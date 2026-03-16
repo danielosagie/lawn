@@ -1,11 +1,13 @@
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
 import { defineConfig } from "vite-plus";
-import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
   staged: {
     "*": "vp check --fix",
+  },
+  resolve: {
+    tsconfigPaths: true,
   },
   lint: {
     plugins: ["oxc", "typescript", "unicorn", "react"],
@@ -135,9 +137,6 @@ export default defineConfig({
     options: {},
   },
   plugins: [
-    tsconfigPaths({
-      projects: ["./tsconfig.json"],
-    }),
     tanstackStart({
       srcDirectory: "app",
       spa: {
