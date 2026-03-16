@@ -5,33 +5,33 @@
 Install dependencies:
 
 ```bash
-bun install
+pnpm install
 ```
 
 Run app + Convex locally:
 
 ```bash
-bun run dev
+pnpm run dev
 ```
 
 Run only the web app:
 
 ```bash
-bun run dev:web
+pnpm run dev:web
 ```
 
 ## Build / Run
 
 ```bash
-bun run build
-bun run start
+pnpm run build
+pnpm run start
 ```
 
 ## Quality checks
 
 ```bash
-bun run typecheck
-bun run lint
+pnpm run typecheck
+pnpm run lint
 ```
 
 ## Environment variables
