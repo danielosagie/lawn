@@ -61,6 +61,38 @@ function buildDownloadFilename(title: string | undefined, key: string) {
   return safeTitle.endsWith(`.${ext}`) ? safeTitle : `${safeTitle}.${ext}`;
 }
 
+async function buildDownloadResult(
+  key: string,
+  options: {
+    title?: string;
+    contentType?: string;
+  },
+): Promise<{ url: string; filename: string }> {
+  const filename = buildDownloadFilename(options.title, key);
+
+  return {
+    url: await buildSignedBucketObjectUrl(key, {
+      expiresIn: 600,
+      filename,
+      contentType: options.contentType ?? "video/mp4",
+    }),
+    filename,
+  };
+}
+
+function getDownloadUnavailableMessage(status: string) {
+  switch (status) {
+    case "uploading":
+      return "This video is still uploading and isn't ready to download yet.";
+    case "processing":
+      return "This video is still processing and isn't ready to download yet.";
+    case "failed":
+      return "This video couldn't be processed, so it isn't available to download.";
+    default:
+      return "This video isn't ready to download yet.";
+  }
+}
+
 function normalizeBucketKey(key: string): string {
   if (key.startsWith("http://") || key.startsWith("https://")) {
     try {
@@ -503,7 +535,7 @@ export const getDownloadUrl = action({
     }
 
     if (video.status !== "ready") {
-      throw new Error("Video not found or not ready");
+      throw new Error(getDownloadUnavailableMessage(video.status));
     }
 
     const key = getValueString(video, "s3Key");
@@ -511,15 +543,75 @@ export const getDownloadUrl = action({
       throw new Error("Original bucket file not found for this video");
     }
 
-    const filename = buildDownloadFilename(video.title, key);
+    return await buildDownloadResult(key, {
+      title: video.title,
+      contentType: video.contentType,
+    });
+  },
+});
 
-    return {
-      url: await buildSignedBucketObjectUrl(key, {
-        expiresIn: 600,
-        filename,
-        contentType: video.contentType ?? "video/mp4",
-      }),
-      filename,
-    };
+export const getPublicDownloadUrl = action({
+  args: { publicId: v.string() },
+  returns: v.object({
+    url: v.string(),
+    filename: v.string(),
+  }),
+  handler: async (ctx, args): Promise<{ url: string; filename: string }> => {
+    const result = await ctx.runQuery(api.videos.getByPublicIdForDownload, {
+      publicId: args.publicId,
+    });
+
+    if (!result?.video) {
+      throw new Error("Video not found");
+    }
+
+    if (result.video.status !== "ready") {
+      throw new Error(getDownloadUnavailableMessage(result.video.status));
+    }
+
+    const key = getValueString(result.video, "s3Key");
+    if (!key) {
+      throw new Error("Original bucket file not found for this video");
+    }
+
+    return await buildDownloadResult(key, {
+      title: result.video.title,
+      contentType: result.video.contentType,
+    });
+  },
+});
+
+export const getSharedDownloadUrl = action({
+  args: { grantToken: v.string() },
+  returns: v.object({
+    url: v.string(),
+    filename: v.string(),
+  }),
+  handler: async (ctx, args): Promise<{ url: string; filename: string }> => {
+    const result = await ctx.runQuery(api.videos.getByShareGrantForDownload, {
+      grantToken: args.grantToken,
+    });
+
+    if (!result?.video) {
+      throw new Error("Video not found");
+    }
+
+    if (!result.allowDownload) {
+      throw new Error("Downloads are disabled for this shared link.");
+    }
+
+    if (result.video.status !== "ready") {
+      throw new Error(getDownloadUnavailableMessage(result.video.status));
+    }
+
+    const key = getValueString(result.video, "s3Key");
+    if (!key) {
+      throw new Error("Original bucket file not found for this video");
+    }
+
+    return await buildDownloadResult(key, {
+      title: result.video.title,
+      contentType: result.video.contentType,
+    });
   },
 });

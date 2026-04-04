@@ -151,6 +151,30 @@ export const getByPublicId = query({
   },
 });
 
+export const getByPublicIdForDownload = query({
+  args: { publicId: v.string() },
+  handler: async (ctx, args) => {
+    const video = await ctx.db
+      .query("videos")
+      .withIndex("by_public_id", (q) => q.eq("publicId", args.publicId))
+      .unique();
+
+    if (!video || video.visibility !== "public") {
+      return null;
+    }
+
+    return {
+      video: {
+        _id: video._id,
+        title: video.title,
+        contentType: video.contentType,
+        s3Key: video.s3Key,
+        status: video.status,
+      },
+    };
+  },
+});
+
 export const getPublicIdByVideoId = query({
   args: { videoId: v.string() },
   returns: v.union(v.string(), v.null()),
@@ -195,6 +219,33 @@ export const getByShareGrant = query({
         s3Key: video.s3Key,
       },
       grantExpiresAt: resolved.grant.expiresAt,
+    };
+  },
+});
+
+export const getByShareGrantForDownload = query({
+  args: { grantToken: v.string() },
+  handler: async (ctx, args) => {
+    const resolved = await resolveActiveShareGrant(ctx, args.grantToken);
+    if (!resolved) {
+      return null;
+    }
+
+    const video = await ctx.db.get(resolved.shareLink.videoId);
+    if (!video) {
+      return null;
+    }
+
+    return {
+      allowDownload: resolved.shareLink.allowDownload,
+      grantExpiresAt: resolved.grant.expiresAt,
+      video: {
+        _id: video._id,
+        title: video.title,
+        contentType: video.contentType,
+        s3Key: video.s3Key,
+        status: video.status,
+      },
     };
   },
 });

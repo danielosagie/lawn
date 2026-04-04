@@ -2,13 +2,14 @@ import { useAction, useMutation } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { Link, useParams } from "@tanstack/react-router";
 import { useUser } from "@clerk/tanstack-react-start";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VideoPlayer, type VideoPlayerHandle } from "@/components/video-player/VideoPlayer";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { triggerDownload } from "@/lib/download";
 import { formatDuration, formatTimestamp, formatRelativeTime } from "@/lib/utils";
-import { AlertCircle, MessageSquare, Clock, X } from "lucide-react";
+import { AlertCircle, MessageSquare, Clock, Download, X } from "lucide-react";
 import { useWatchData } from "./-watch.data";
 
 export default function WatchPage() {
@@ -18,6 +19,7 @@ export default function WatchPage() {
 
   const createComment = useMutation(api.comments.createForPublic);
   const getPlaybackSession = useAction(api.videoActions.getPublicPlaybackSession);
+  const getDownloadUrl = useAction(api.videoActions.getPublicDownloadUrl);
 
   const { videoData, comments } = useWatchData({ publicId });
   const [playbackSession, setPlaybackSession] = useState<{
@@ -30,6 +32,8 @@ export default function WatchPage() {
   const [commentText, setCommentText] = useState("");
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
   const [commentError, setCommentError] = useState<string | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const [mobileCommentsOpen, setMobileCommentsOpen] = useState(false);
   const playerRef = useRef<VideoPlayerHandle | null>(null);
 
@@ -61,6 +65,11 @@ export default function WatchPage() {
       cancelled = true;
     };
   }, [getPlaybackSession, publicId, videoData?.video?.muxPlaybackId]);
+
+  useEffect(() => {
+    setIsDownloading(false);
+    setDownloadError(null);
+  }, [publicId]);
 
   const flattenedComments = useMemo(() => {
     if (!comments) return [] as Array<{ _id: string; timestampSeconds: number; resolved: boolean }>;
@@ -102,6 +111,26 @@ export default function WatchPage() {
       setIsSubmittingComment(false);
     }
   };
+
+  const handleDownload = useCallback(async () => {
+    if (isDownloading) return;
+
+    setDownloadError(null);
+    setIsDownloading(true);
+    try {
+      const result = await getDownloadUrl({ publicId });
+      triggerDownload(result.url, result.filename);
+    } catch (error) {
+      console.error("Failed to prepare public download:", error);
+      setDownloadError(
+        error instanceof Error
+          ? error.message
+          : "Unable to prepare this download right now.",
+      );
+    } finally {
+      setIsDownloading(false);
+    }
+  }, [getDownloadUrl, isDownloading, publicId]);
 
   if (videoData === undefined) {
     return (
@@ -161,6 +190,17 @@ export default function WatchPage() {
           <Button
             variant="outline"
             size="sm"
+            className="h-8"
+            onClick={() => void handleDownload()}
+            disabled={isDownloading}
+            aria-label={isDownloading ? "Preparing download" : "Download video"}
+          >
+            <Download className="h-4 w-4" />
+            <span className="hidden sm:inline">{isDownloading ? "Preparing..." : "Download"}</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             className="lg:hidden h-8"
             onClick={() => setMobileCommentsOpen(true)}
           >
@@ -176,6 +216,17 @@ export default function WatchPage() {
       <div className="flex-1 flex overflow-hidden">
         {/* Video player area */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-black">
+          {downloadError ? (
+            <div
+              role="alert"
+              aria-live="assertive"
+              aria-atomic="true"
+              className="border-b border-[#dc2626]/40 bg-[#f8d7d7] px-5 py-3 text-sm text-[#7f1d1d]"
+            >
+              {downloadError}
+            </div>
+          ) : null}
+
           {playbackSession?.url ? (
             <VideoPlayer
               ref={playerRef}
