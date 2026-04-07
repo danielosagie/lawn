@@ -1,51 +1,17 @@
 "use node";
 
 import Mux from "@mux/mux-node";
-
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
-  }
-  return value;
-}
-
-function readEnv(...names: string[]): string | null {
-  for (const name of names) {
-    const value = process.env[name];
-    if (value) {
-      return value;
-    }
-  }
-  return null;
-}
+import { env, getMuxPrivateKey, getMuxSigningKey } from "./env";
 
 function normalizePrivateKey(value: string): string {
   return value.includes("\\n") ? value.replace(/\\n/g, "\n") : value;
 }
 
 function getMuxJwtCredentials(): { keyId: string; keySecret: string } {
-  const keyId = readEnv(
-    "MUX_SIGNING_KEY",
-    "MUX_SIGNING_KEY_ID",
-  );
-  if (!keyId) {
-    throw new Error(
-      "Missing required environment variable: MUX_SIGNING_KEY (or legacy MUX_SIGNING_KEY_ID)",
-    );
-  }
-
-  const keySecret = readEnv(
-    "MUX_PRIVATE_KEY",
-    "MUX_SIGNING_PRIVATE_KEY",
-  );
-  if (!keySecret) {
-    throw new Error(
-      "Missing required environment variable: MUX_PRIVATE_KEY (or legacy MUX_SIGNING_PRIVATE_KEY)",
-    );
-  }
-
-  return { keyId, keySecret: normalizePrivateKey(keySecret) };
+  return {
+    keyId: getMuxSigningKey(),
+    keySecret: normalizePrivateKey(getMuxPrivateKey()),
+  };
 }
 
 let cachedMux: Mux | null = null;
@@ -54,8 +20,8 @@ export function getMuxClient(): Mux {
   if (cachedMux) return cachedMux;
 
   cachedMux = new Mux({
-    tokenId: requireEnv("MUX_TOKEN_ID"),
-    tokenSecret: requireEnv("MUX_TOKEN_SECRET"),
+    tokenId: env.MUX_TOKEN_ID,
+    tokenSecret: env.MUX_TOKEN_SECRET,
   });
 
   return cachedMux;
@@ -148,9 +114,7 @@ export function verifyMuxWebhookSignature(rawBody: string, signature: string | n
   }
 
   const mux = getMuxClient();
-  const webhookSecret = requireEnv("MUX_WEBHOOK_SECRET");
-
   mux.webhooks.verifySignature(rawBody, {
     "mux-signature": signature,
-  }, webhookSecret);
+  }, env.MUX_WEBHOOK_SECRET);
 }

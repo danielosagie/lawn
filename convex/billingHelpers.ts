@@ -1,6 +1,7 @@
 import { components } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import { MutationCtx, QueryCtx } from "./_generated/server";
+import { env, getStripePriceIdForEnvVar } from "./env";
 
 export type TeamPlan = "basic" | "pro";
 
@@ -51,8 +52,8 @@ export function resolvePlanFromStripePriceId(
 ): TeamPlan | null {
   if (!hasText(stripePriceId)) return null;
 
-  const basicPriceId = process.env.STRIPE_PRICE_BASIC_MONTHLY;
-  const proPriceId = process.env.STRIPE_PRICE_PRO_MONTHLY;
+  const basicPriceId = env.STRIPE_PRICE_BASIC_MONTHLY;
+  const proPriceId = env.STRIPE_PRICE_PRO_MONTHLY;
 
   if (hasText(basicPriceId) && stripePriceId === basicPriceId) return "basic";
   if (hasText(proPriceId) && stripePriceId === proPriceId) return "pro";
@@ -62,11 +63,7 @@ export function resolvePlanFromStripePriceId(
 export function getStripePriceIdForPlan(plan: TeamPlan): string {
   const variableName =
     plan === "basic" ? "STRIPE_PRICE_BASIC_MONTHLY" : "STRIPE_PRICE_PRO_MONTHLY";
-  const value = process.env[variableName];
-  if (!hasText(value)) {
-    throw new Error(`${variableName} is not configured`);
-  }
-  return value;
+  return getStripePriceIdForEnvVar(variableName);
 }
 
 export function hasActiveTeamSubscriptionStatus(

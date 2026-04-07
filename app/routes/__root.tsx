@@ -11,6 +11,7 @@ import { ConvexClientProvider } from "@/lib/convex";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme/ThemeToggle";
 import { NotFound } from "@/components/ui/NotFound";
+import { env } from "@/env/client";
 import appCss from "../app.css?url";
 
 export const Route = createRootRoute({
@@ -64,14 +65,8 @@ function RootComponent() {
 }
 
 function AppShell({ children }: { children: ReactNode }) {
-  const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
-
-  if (!publishableKey) {
-    throw new Error("Missing VITE_CLERK_PUBLISHABLE_KEY");
-  }
-
   return (
-    <ClerkProvider publishableKey={publishableKey}>
+    <ClerkProvider publishableKey={env.VITE_CLERK_PUBLISHABLE_KEY}>
       <RootDocument>{children}</RootDocument>
     </ClerkProvider>
   );
