@@ -273,13 +273,14 @@ function shouldDeleteUploadedObjectOnFailure(error: unknown): boolean {
     return false;
   }
 
+  const message = error.message.toLowerCase();
   return (
-    error.message.includes("Unsupported video format") ||
-    error.message.includes("Video file is too large") ||
-    error.message.includes("Uploaded video file not found") ||
-    error.message.includes("Uploaded video file size did not match") ||
-    error.message.includes("Multipart upload completed with") ||
-    error.message.includes("Storage limit reached")
+    message.includes("unsupported video format") ||
+    message.includes("file is too large") ||
+    message.includes("uploaded video file not found") ||
+    message.includes("uploaded video file size did not match") ||
+    message.includes("multipart upload completed with") ||
+    message.includes("storage limit")
   );
 }
 

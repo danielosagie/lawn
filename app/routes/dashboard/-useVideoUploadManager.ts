@@ -34,6 +34,18 @@ function createUploadId() {
   return Math.random().toString(36).slice(2);
 }
 
+function getUploadErrorMessage(error: unknown) {
+  if (!(error instanceof Error)) return "Upload failed";
+
+  const uncaughtErrorMatch = error.message.match(/Uncaught Error:\s*([^\n]+)/);
+  if (uncaughtErrorMatch?.[1]) return uncaughtErrorMatch[1].trim();
+
+  const serverErrorMatch = error.message.match(/Server Error\s*\n\s*(.+)$/s);
+  if (serverErrorMatch?.[1]) return serverErrorMatch[1].trim();
+
+  return error.message || "Upload failed";
+}
+
 function createMultipartParts(file: File, partSizeBytes: number) {
   const parts: MultipartUploadPart[] = [];
 
@@ -365,7 +377,7 @@ export function useVideoUploadManager() {
             }).catch(console.error);
           }
 
-          const errorMessage = error instanceof Error ? error.message : "Upload failed";
+          const errorMessage = getUploadErrorMessage(error);
 
           setUploads((prev) =>
             prev.map((upload) =>

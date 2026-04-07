@@ -5,6 +5,7 @@ import { MutationCtx, QueryCtx } from "./_generated/server";
 export type TeamPlan = "basic" | "pro";
 
 const GIBIBYTE = 1024 ** 3;
+const TEBIBYTE = 1024 ** 4;
 
 export const TEAM_PLAN_MONTHLY_PRICE_USD: Record<TeamPlan, number> = {
   basic: 5,
@@ -13,11 +14,31 @@ export const TEAM_PLAN_MONTHLY_PRICE_USD: Record<TeamPlan, number> = {
 
 export const TEAM_PLAN_STORAGE_LIMIT_BYTES: Record<TeamPlan, number> = {
   basic: 100 * GIBIBYTE,
-  pro: 1024 * GIBIBYTE,
+  pro: TEBIBYTE,
+};
+
+export const TEAM_PLAN_MAX_FILE_SIZE_BYTES: Record<TeamPlan, number> = {
+  basic: 10 * GIBIBYTE,
+  pro: 50 * GIBIBYTE,
 };
 
 function hasText(value: string | undefined | null): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+export function formatPlanLabel(plan: TeamPlan) {
+  return plan === "basic" ? "Basic" : "Pro";
+}
+
+export function formatBytesForBilling(bytes: number) {
+  const safeBytes = Number.isFinite(bytes) ? Math.max(0, bytes) : 0;
+  if (safeBytes >= TEBIBYTE) {
+    const value = safeBytes / TEBIBYTE;
+    return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)} TB`;
+  }
+
+  const value = safeBytes / GIBIBYTE;
+  return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)} GB`;
 }
 
 export function normalizeStoredTeamPlan(plan: string): TeamPlan {
@@ -137,8 +158,13 @@ export async function assertTeamCanStoreBytes(
   const requestedBytes = Number.isFinite(incomingBytes) ? Math.max(0, incomingBytes) : 0;
 
   if (storageUsedBytes + requestedBytes > storageLimitBytes) {
+    const planLabel = formatPlanLabel(state.plan);
+    const actionCopy =
+      state.plan === "basic"
+        ? "Upgrade to Pro or delete old videos to free up space."
+        : "Delete old videos to free up space.";
     throw new Error(
-      `Storage limit reached for the ${state.plan} plan. Upgrade to continue uploading.`,
+      `This upload would exceed your team's ${planLabel} plan storage limit. You're using ${formatBytesForBilling(storageUsedBytes)} of ${formatBytesForBilling(storageLimitBytes)}, and this file is ${formatBytesForBilling(requestedBytes)}. ${actionCopy}`,
     );
   }
 
@@ -146,5 +172,35 @@ export async function assertTeamCanStoreBytes(
     ...state,
     storageUsedBytes,
     storageLimitBytes,
+  };
+}
+
+export async function assertTeamCanUploadFileBytes(
+  ctx: BillingCtx,
+  teamId: Id<"teams">,
+  fileSizeBytes: number,
+) {
+  const state = await assertTeamHasActiveSubscription(ctx, teamId);
+  const requestedBytes = Number.isFinite(fileSizeBytes)
+    ? Math.max(0, fileSizeBytes)
+    : 0;
+  const maxFileSizeBytes = TEAM_PLAN_MAX_FILE_SIZE_BYTES[state.plan];
+
+  if (requestedBytes > maxFileSizeBytes) {
+    const planLabel = formatPlanLabel(state.plan);
+    const maxFileSizeLabel = formatBytesForBilling(maxFileSizeBytes);
+    const upgradeCopy =
+      state.plan === "basic"
+        ? " Upgrade to Pro for files up to 50 GB."
+        : "";
+
+    throw new Error(
+      `This file is too large for the ${planLabel} plan. ${planLabel} supports files up to ${maxFileSizeLabel}.${upgradeCopy}`,
+    );
+  }
+
+  return {
+    ...state,
+    maxFileSizeBytes,
   };
 }
