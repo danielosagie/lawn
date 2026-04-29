@@ -5,7 +5,7 @@ import { useTheme } from "@/components/theme/ThemeToggle";
 import React from "react";
 import { useConvex } from "convex/react";
 import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
-import { prewarmDashboardIndex } from "../../app/routes/dashboard/-index.data";
+import { prewarmDashboardIndex } from "@/app/routes/dashboard/-index.data";
 
 function ThemeToggleButton() {
   const { theme, toggleTheme, mounted } = useTheme();

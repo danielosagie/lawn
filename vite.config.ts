@@ -9,7 +9,7 @@ export default defineConfig({
       projects: ["./tsconfig.json"],
     }),
     tanstackStart({
-      srcDirectory: "app",
+      srcDirectory: "src/app",
       spa: {
         enabled: true,
         maskPath: "/mono",

@@ -7,7 +7,7 @@ export default tseslint.config(js.configs.recommended, ...tseslint.configs.recom
     ".next/**",
     "build/**",
     "dist/**",
-    "app/routeTree.gen.ts",
+    "src/app/routeTree.gen.ts",
     "convex/_generated/**",
     "coverage/**",
   ],
