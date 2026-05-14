@@ -22,14 +22,14 @@ export const Route = createRootRoute({
       {
         name: "description",
         content:
-          "Video review and collaboration for creative teams. Frame-accurate comments, unlimited seats, $5/month flat. The open source Frame.io alternative.",
+          "Video review and collaboration for creative teams. Frame-accurate comments, unlimited seats, flat pricing from $25/month. The open source Frame.io alternative.",
       },
       { property: "og:site_name", content: "snip" },
       { name: "twitter:site", content: "@theo" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
-      { rel: "icon", type: "image/svg+xml", href: "/grass-logo.svg?v=4" },
+      { rel: "icon", type: "image/svg+xml", href: "/favicon.svg?v=1" },
       { rel: "icon", type: "image/x-icon", href: "/favicon.ico?v=4" },
       { rel: "shortcut icon", href: "/favicon.ico?v=4" },
       { rel: "preconnect", href: "https://stream.mux.com", crossOrigin: "anonymous" },
