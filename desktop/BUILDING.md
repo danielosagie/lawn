@@ -47,15 +47,33 @@ builder will sign the app bundle and submit it to Apple's notary service.
 Without notarization, users have to right-click → Open the first time, or run
 `xattr -d com.apple.quarantine /Applications/snip.app` after install.
 
+## Generating the DMG cosmetics
+
+```bash
+bun run generate:dmg-assets                   # uses ../public/grass-logo.svg
+bun run generate:dmg-assets ./icon-1024.png   # custom source
+```
+
+What it does:
+- **`resources/icon.icns`** — full Apple iconset (16/32/64/128/256/512/1024 + @2x
+  variants), built with macOS-bundled `sips` + `iconutil`. From an SVG source
+  it shells out to `rsvg-convert` (`brew install librsvg`). PNG sources work
+  with no extra deps.
+- **`resources/dmg-background.png`** — 540×380 brutalist cream backdrop with
+  an orange band where the drag-to-Applications arrow sits. Uses ImageMagick
+  (`brew install imagemagick`) when present; falls back to a flat cream PNG
+  so the DMG still builds without it.
+
+The script only needs to run when the source artwork changes. Both outputs
+are committed-once so CI builds don't depend on the optional brew tools.
+
 ## What still needs to ship before public release
 
-- **Icon assets**: `resources/icon.icns` (required by `mac.icon`). Generate
-  from a 1024×1024 PNG with `iconutil` or any iconset tool.
-- **DMG background**: `resources/dmg-background.png` (540×380). The drag-to-
-  Applications arrow lives in user expectations — bundling a background image
-  with the arrow is the usual touch. (Listed in `package.json` but missing
-  from the repo right now; electron-builder will use a plain background.)
-- **Code signing**: see above.
+- **Source artwork**: `public/grass-logo.svg` (used as the default) is the
+  wordmark, not an app-icon mark. For a publishable build, drop a
+  1024×1024 PNG of the *icon* (just the orange mark on a cream square, no
+  wordmark) and run `bun run generate:dmg-assets path/to/icon-1024.png`.
+- **Code signing + notarization**: see above.
 
 ## Bundled prerequisites
 

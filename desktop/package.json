@@ -11,6 +11,7 @@
     "dev:electron": "wait-on http://localhost:5300 && electron .",
     "dev": "concurrently -n web,electron -c blue,magenta \"bun run dev:renderer\" \"bun run dev:electron\"",
     "build:renderer": "vite build",
+    "generate:dmg-assets": "./scripts/generate-dmg-assets.sh",
     "build:dmg": "bun run build:renderer && electron-builder --mac dmg --x64 --arm64",
     "build:dmg:arm64": "bun run build:renderer && electron-builder --mac dmg --arm64",
     "build:dmg:x64": "bun run build:renderer && electron-builder --mac dmg --x64",
