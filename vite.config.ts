@@ -27,6 +27,7 @@ export default defineConfig({
         { path: "/" },
         { path: "/compare/frameio" },
         { path: "/compare/wipster" },
+        { path: "/compare/lucidlink" },
         { path: "/for/video-editors" },
         { path: "/for/agencies" },
         { path: "/pricing" },

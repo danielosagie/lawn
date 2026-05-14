@@ -99,7 +99,9 @@ rclone mount \
   --vfs-cache-mode writes \
   --vfs-cache-max-size 50G \
   --vfs-write-back 5s \
-  --dir-cache-time 1m \
+  --vfs-read-ahead 128M \
+  --vfs-read-chunk-size 32M \
+  --dir-cache-time 60s \
   --buffer-size 32M \
   --transfers 4 \
   --daemon
@@ -118,17 +120,21 @@ pkill -f "rclone mount videoinfra"
 ### Caveats
 - macFUSE is no longer fully open source post–Big Sur. You'll re-approve
   the kext on macOS upgrades.
-- Random-access reads of 4K files are slower than LucidLink; expect 1–3s
-  scrub latency on cold cache.
+- Random-access reads on a cold cache are still slower than a dedicated
+  cloud-NAS client like LucidLink; large **read-ahead** and **read chunk**
+  sizes (see flags above) narrow the gap for **sequential** playback and
+  bin scrolling — the same knobs the snip desktop app uses for **Mount**.
 - Don't run two simultaneous editors on the same .prproj. The mount has
   no proper lock primitives.
 
 ## Option C — LucidLink (paid)
 
 If you'll have more than 2–3 editors hitting the same project regularly
-and need real file locking + partial-read perf, LucidLink ($35/seat/mo) is
-the only consumer answer. The platform-side layout is identical — point
-LucidLink at the same bucket and it just works.
+and need vendor-managed file locking + a globally tuned cache, LucidLink
+is the consumer-grade answer for a shared Filespace. List pricing and
+capacity live on [lucidlink.com/pricing](https://www.lucidlink.com/pricing).
+snip still pairs well: review in the web app, then mount your **own**
+bucket with rclone when you want Finder/NLE-native paths.
 
 ## How the desktop app fits
 

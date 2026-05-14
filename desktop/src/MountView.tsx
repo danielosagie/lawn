@@ -94,7 +94,9 @@ export function MountView({ settings }: Props) {
         <p style={{ margin: 0, color: "#666", fontSize: 13 }}>
           Streams your S3 / R2 bucket as a real Mac volume so Finder,
           Premiere, and Resolve see project files natively — no manual pull.
-          One mount per machine.
+          One mount per machine. Uses the same tuned rclone VFS flags as{" "}
+          <code style={{ fontSize: 12 }}>docs/MOUNTING.md</code> (read-ahead +
+          chunk size for big sequential reads).
         </p>
       </header>
 

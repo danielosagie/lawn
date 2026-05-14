@@ -312,6 +312,9 @@ async function startMount({ mountPath } = {}) {
     RCLONE_CONFIG_VIDEOINFRA_ACL: "private",
   };
 
+  // VFS tuned for large sequential reads (NLE bins, playback) — closer to how
+  // dedicated cloud-NAS clients behave than default tiny read-aheads. Keep in
+  // sync with docs/MOUNTING.md + desktop Settings “Mount command” preview.
   const args = [
     "mount",
     `videoinfra:${s.bucket}/projects`,
@@ -322,6 +325,10 @@ async function startMount({ mountPath } = {}) {
     "50G",
     "--vfs-write-back",
     "5s",
+    "--vfs-read-ahead",
+    "128M",
+    "--vfs-read-chunk-size",
+    "32M",
     "--buffer-size",
     "32M",
     "--dir-cache-time",

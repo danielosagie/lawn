@@ -57,6 +57,14 @@ export function MarketingFooter() {
                   snip vs Wipster
                 </Link>
               </li>
+              <li>
+                <Link
+                  to="/compare/lucidlink"
+                  className="hover:text-[#FFB380] transition-colors"
+                >
+                  snip vs LucidLink
+                </Link>
+              </li>
             </ul>
           </div>
           <div>

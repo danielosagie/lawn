@@ -28,6 +28,7 @@ import { Route as DashboardSettingsRouteImport } from './routes/dashboard/settin
 import { Route as DashboardBillingRouteImport } from './routes/dashboard/billing'
 import { Route as DashboardTeamSlugRouteImport } from './routes/dashboard/$teamSlug'
 import { Route as CompareWipsterRouteImport } from './routes/compare.wipster'
+import { Route as CompareLucidlinkRouteImport } from './routes/compare.lucidlink'
 import { Route as CompareFrameioRouteImport } from './routes/compare.frameio'
 import { Route as DashboardTeamSlugIndexRouteImport } from './routes/dashboard/$teamSlug.index'
 import { Route as DashboardTeamSlugSettingsRouteImport } from './routes/dashboard/$teamSlug.settings'
@@ -133,6 +134,11 @@ const CompareWipsterRoute = CompareWipsterRouteImport.update({
   path: '/compare/wipster',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CompareLucidlinkRoute = CompareLucidlinkRouteImport.update({
+  id: '/compare/lucidlink',
+  path: '/compare/lucidlink',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CompareFrameioRoute = CompareFrameioRouteImport.update({
   id: '/compare/frameio',
   path: '/compare/frameio',
@@ -194,6 +200,7 @@ export interface FileRoutesByFullPath {
   '/sign-in': typeof SignInRouteWithChildren
   '/sign-up': typeof SignUpRouteWithChildren
   '/compare/frameio': typeof CompareFrameioRoute
+  '/compare/lucidlink': typeof CompareLucidlinkRoute
   '/compare/wipster': typeof CompareWipsterRoute
   '/dashboard/$teamSlug': typeof DashboardTeamSlugRouteWithChildren
   '/dashboard/billing': typeof DashboardBillingRoute
@@ -223,6 +230,7 @@ export interface FileRoutesByTo {
   '/sign-in': typeof SignInRouteWithChildren
   '/sign-up': typeof SignUpRouteWithChildren
   '/compare/frameio': typeof CompareFrameioRoute
+  '/compare/lucidlink': typeof CompareLucidlinkRoute
   '/compare/wipster': typeof CompareWipsterRoute
   '/dashboard/billing': typeof DashboardBillingRoute
   '/dashboard/settings': typeof DashboardSettingsRoute
@@ -251,6 +259,7 @@ export interface FileRoutesById {
   '/sign-in': typeof SignInRouteWithChildren
   '/sign-up': typeof SignUpRouteWithChildren
   '/compare/frameio': typeof CompareFrameioRoute
+  '/compare/lucidlink': typeof CompareLucidlinkRoute
   '/compare/wipster': typeof CompareWipsterRoute
   '/dashboard/$teamSlug': typeof DashboardTeamSlugRouteWithChildren
   '/dashboard/billing': typeof DashboardBillingRoute
@@ -283,6 +292,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/sign-up'
     | '/compare/frameio'
+    | '/compare/lucidlink'
     | '/compare/wipster'
     | '/dashboard/$teamSlug'
     | '/dashboard/billing'
@@ -312,6 +322,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/sign-up'
     | '/compare/frameio'
+    | '/compare/lucidlink'
     | '/compare/wipster'
     | '/dashboard/billing'
     | '/dashboard/settings'
@@ -339,6 +350,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/sign-up'
     | '/compare/frameio'
+    | '/compare/lucidlink'
     | '/compare/wipster'
     | '/dashboard/$teamSlug'
     | '/dashboard/billing'
@@ -370,6 +382,7 @@ export interface RootRouteChildren {
   SignInRoute: typeof SignInRouteWithChildren
   SignUpRoute: typeof SignUpRouteWithChildren
   CompareFrameioRoute: typeof CompareFrameioRoute
+  CompareLucidlinkRoute: typeof CompareLucidlinkRoute
   CompareWipsterRoute: typeof CompareWipsterRoute
   ForAgenciesRoute: typeof ForAgenciesRoute
   ForVideoEditorsRoute: typeof ForVideoEditorsRoute
@@ -511,6 +524,13 @@ declare module '@tanstack/react-router' {
       path: '/compare/wipster'
       fullPath: '/compare/wipster'
       preLoaderRoute: typeof CompareWipsterRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/compare/lucidlink': {
+      id: '/compare/lucidlink'
+      path: '/compare/lucidlink'
+      fullPath: '/compare/lucidlink'
+      preLoaderRoute: typeof CompareLucidlinkRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/compare/frameio': {
@@ -681,6 +701,7 @@ const rootRouteChildren: RootRouteChildren = {
   SignInRoute: SignInRouteWithChildren,
   SignUpRoute: SignUpRouteWithChildren,
   CompareFrameioRoute: CompareFrameioRoute,
+  CompareLucidlinkRoute: CompareLucidlinkRoute,
   CompareWipsterRoute: CompareWipsterRoute,
   ForAgenciesRoute: ForAgenciesRoute,
   ForVideoEditorsRoute: ForVideoEditorsRoute,

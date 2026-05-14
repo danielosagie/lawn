@@ -142,6 +142,16 @@ const images: { name: string; jsx: ReturnType<typeof TextOverlay> }[] = [
     ),
   },
   {
+    name: "compare-lucidlink",
+    jsx: (
+      <TextOverlay
+        title="lawn vs LucidLink"
+        titleSize={88}
+        subtitle="Review + your bucket mount"
+      />
+    ),
+  },
+  {
     name: "for-editors",
     jsx: (
       <TextOverlay
