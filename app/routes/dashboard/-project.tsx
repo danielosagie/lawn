@@ -550,13 +550,10 @@ export default function ProjectPage({
         }}
       />
 
-      {/* Header */}
+      {/* Header \u2014 breadcrumb skips the team-slug stage. Single-team users
+          don't need to see "Home / <team> / <project>"; for multi-team we
+          have the team-switcher in the sidebar header. */}
       <DashboardHeader paths={[
-        {
-          label: resolvedTeamSlug,
-          href: teamHomePath(resolvedTeamSlug),
-          prewarmIntentHandlers: prewarmTeamIntentHandlers,
-        },
         { label: project?.name ?? "\u00A0" }
       ]}>
         <div className={cn(
