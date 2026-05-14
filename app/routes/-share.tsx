@@ -40,6 +40,7 @@ export default function SharePage() {
   const createComment = useMutation(api.comments.createForShareGrant);
   const getPaywalledPlayback = useAction(api.videoActions.getSharedPaywalledPlayback);
   const getImagePreview = useAction(api.videoActions.getSharedImagePreview);
+  const getFileAccess = useAction(api.videoActions.getSharedFileAccess);
   const createCheckoutForGrant = useAction(
     api.paymentsActions.createCheckoutForGrant,
   );
@@ -53,10 +54,19 @@ export default function SharePage() {
   const [passwordError, setPasswordError] = useState(false);
   const [isRequestingGrant, setIsRequestingGrant] = useState(false);
   const [playbackSession, setPlaybackSession] = useState<{
-    kind: "video" | "image";
+    kind: "video" | "image" | "file";
+    fileKind?: "pdf" | "audio" | "text" | "file";
+    fileName?: string | null;
+    contentType?: string | null;
     url: string;
     posterUrl: string;
-    mode: "public" | "preview" | "preview_pending" | "full" | "unsupported";
+    mode:
+      | "public"
+      | "preview"
+      | "preview_pending"
+      | "full"
+      | "unsupported"
+      | "locked";
     tokenExpiresAt: number | null;
   } | null>(null);
   const [isLoadingPlayback, setIsLoadingPlayback] = useState(false);
@@ -186,8 +196,10 @@ export default function SharePage() {
       return;
     }
 
-    // Branch on content type. Images go through the sharp-watermark preview
-    // pipeline + signed S3 URL; videos go through Mux signed playback.
+    // Branch on content type:
+    //  • video/* or anything with a Mux playback id → signed Mux stream
+    //  • image/* → sharp-rendered watermarked preview + signed S3
+    //  • pdf / audio / text / etc → signed S3 with the file kind for UI
     const activeContentType =
       (isBundle
         ? bundleItems.find((item) => item._id === activeItemId)?.contentType
@@ -195,8 +207,28 @@ export default function SharePage() {
           ? summary.single?.contentType
           : null) ?? null;
     const isImage = Boolean(activeContentType?.startsWith("image/"));
+    const isVideo =
+      Boolean(activeContentType?.startsWith("video/")) ||
+      (isBundle
+        ? bundleItems.find((item) => item._id === activeItemId)?.hasMuxPlayback ?? false
+        : true);
 
-    const loader = isImage
+    const loader: Promise<{
+      kind: "video" | "image" | "file";
+      fileKind?: "pdf" | "audio" | "text" | "file";
+      fileName?: string | null;
+      contentType?: string | null;
+      url: string;
+      posterUrl: string;
+      mode:
+        | "public"
+        | "preview"
+        | "preview_pending"
+        | "full"
+        | "unsupported"
+        | "locked";
+      tokenExpiresAt: number | null;
+    }> = isImage
       ? getImagePreview({
           grantToken,
           itemVideoId: activeItemId ?? undefined,
@@ -205,18 +237,33 @@ export default function SharePage() {
           url: s.url,
           posterUrl: "",
           mode: s.mode,
+          contentType: s.contentType,
           tokenExpiresAt: s.tokenExpiresAt,
         }))
-      : getPaywalledPlayback({
-          grantToken,
-          itemVideoId: activeItemId ?? undefined,
-        }).then((s) => ({
-          kind: "video" as const,
-          url: s.url,
-          posterUrl: s.posterUrl,
-          mode: s.mode,
-          tokenExpiresAt: s.tokenExpiresAt,
-        }));
+      : isVideo
+        ? getPaywalledPlayback({
+            grantToken,
+            itemVideoId: activeItemId ?? undefined,
+          }).then((s) => ({
+            kind: "video" as const,
+            url: s.url,
+            posterUrl: s.posterUrl,
+            mode: s.mode,
+            tokenExpiresAt: s.tokenExpiresAt,
+          }))
+        : getFileAccess({
+            grantToken,
+            itemVideoId: activeItemId ?? undefined,
+          }).then((s) => ({
+            kind: "file" as const,
+            fileKind: s.kind,
+            fileName: s.fileName,
+            contentType: s.contentType,
+            url: s.url,
+            posterUrl: "",
+            mode: s.mode,
+            tokenExpiresAt: s.tokenExpiresAt,
+          }));
 
     void loader
       .then((session) => {
@@ -247,6 +294,7 @@ export default function SharePage() {
     activeItemId,
     bundleItems,
     summary,
+    getFileAccess,
   ]);
 
   // Heartbeat — refresh the signed Mux JWT before it expires. Token TTL is
@@ -741,6 +789,55 @@ export default function SharePage() {
                 />
               ) : null}
             </div>
+          ) : playbackSession?.kind === "file" ? (
+            playbackSession.fileKind === "pdf" && playbackSession.url ? (
+              <iframe
+                src={playbackSession.url}
+                title={playbackSession.fileName ?? "Shared PDF"}
+                className="w-full h-[80vh] bg-white"
+              />
+            ) : playbackSession.fileKind === "audio" && playbackSession.url ? (
+              <div className="bg-[#1a1a1a] p-8 flex items-center justify-center">
+                <audio
+                  controls
+                  src={playbackSession.url}
+                  controlsList={isPaywalled ? "nodownload" : undefined}
+                  className="w-full max-w-xl"
+                />
+              </div>
+            ) : (
+              <div className="bg-[#e8e8e0] p-10 flex flex-col items-center justify-center gap-4 text-center">
+                <div className="text-xs font-mono font-bold uppercase tracking-widest text-[#888]">
+                  {playbackSession.fileKind === "pdf"
+                    ? "PDF"
+                    : playbackSession.fileKind === "text"
+                      ? "Text"
+                      : "File"}
+                </div>
+                <div className="text-lg font-black text-[#1a1a1a]">
+                  {playbackSession.fileName ?? video?.title ?? "Shared file"}
+                </div>
+                <div className="text-xs text-[#888] font-mono">
+                  {playbackSession.contentType ?? "application/octet-stream"}
+                </div>
+                {playbackSession.mode === "locked" ? (
+                  <p className="text-sm text-[#1a1a1a] max-w-md">
+                    Preview locked until paid. Pay above to unlock the file —
+                    you can download or open it inline once the grant flips
+                    to paid.
+                  </p>
+                ) : downloadAllowed ? (
+                  <Button onClick={() => void handleDownload()}>
+                    <Download className="mr-1.5 h-4 w-4" />
+                    Download
+                  </Button>
+                ) : (
+                  <p className="text-sm text-[#888] max-w-md">
+                    The owner disabled downloads on this share link.
+                  </p>
+                )}
+              </div>
+            )
           ) : (
             <div className="relative aspect-video overflow-hidden rounded-xl border border-zinc-800/80 bg-black shadow-[0_10px_40px_rgba(0,0,0,0.45)]">
               {(playbackSession?.posterUrl || video?.thumbnailUrl?.startsWith("http")) ? (

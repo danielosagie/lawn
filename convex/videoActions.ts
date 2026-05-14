@@ -661,6 +661,134 @@ export const getSharedDownloadUrl = action({
 });
 
 /**
+ * Generic file access for share-page items that aren't video or image —
+ * PDFs, audio, docs, archives. Returns a signed S3 URL when authorized
+ * (no paywall, or paywall + paid grant). Pre-payment we return mode:
+ * "locked" with no URL — the share page shows a file tile with a "Pay to
+ * view/download" CTA. Page-1-only PDF previews are a future enhancement
+ * (requires pdf-poppler or similar; sharp doesn't read PDF natively).
+ */
+export const getSharedFileAccess = action({
+  args: {
+    grantToken: v.string(),
+    itemVideoId: v.optional(v.id("videos")),
+  },
+  returns: v.object({
+    mode: v.union(
+      v.literal("public"),
+      v.literal("full"),
+      v.literal("locked"),
+      v.literal("unsupported"),
+    ),
+    kind: v.union(
+      v.literal("pdf"),
+      v.literal("audio"),
+      v.literal("text"),
+      v.literal("file"),
+    ),
+    url: v.string(),
+    contentType: v.union(v.string(), v.null()),
+    fileName: v.union(v.string(), v.null()),
+    tokenExpiresAt: v.union(v.number(), v.null()),
+    paywall: v.union(
+      v.object({
+        priceCents: v.number(),
+        currency: v.string(),
+        description: v.optional(v.string()),
+      }),
+      v.null(),
+    ),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    mode: "public" | "full" | "locked" | "unsupported";
+    kind: "pdf" | "audio" | "text" | "file";
+    url: string;
+    contentType: string | null;
+    fileName: string | null;
+    tokenExpiresAt: number | null;
+    paywall: { priceCents: number; currency: string; description?: string } | null;
+  }> => {
+    const resolved = await ctx.runQuery(api.videos.getByShareGrantWithPaywall, {
+      grantToken: args.grantToken,
+      itemVideoId: args.itemVideoId,
+    });
+    if (!resolved) throw new Error("Share grant invalid or expired.");
+    const { video, shareLink, grant } = resolved;
+
+    const contentType = video.contentType ?? null;
+    const fileName = video.title ?? null;
+
+    const kind: "pdf" | "audio" | "text" | "file" = !contentType
+      ? "file"
+      : contentType === "application/pdf"
+        ? "pdf"
+        : contentType.startsWith("audio/")
+          ? "audio"
+          : contentType.startsWith("text/") || contentType === "application/json"
+            ? "text"
+            : "file";
+
+    if (!video.s3Key) {
+      return {
+        mode: "unsupported" as const,
+        kind,
+        url: "",
+        contentType,
+        fileName,
+        tokenExpiresAt: null,
+        paywall: shareLink.paywall,
+      };
+    }
+
+    const TTL_SECONDS = 600;
+    const paid = Boolean(grant.paidAt);
+
+    if (!shareLink.paywall) {
+      return {
+        mode: "public" as const,
+        kind,
+        url: await buildSignedBucketObjectUrl(video.s3Key, {
+          expiresIn: TTL_SECONDS,
+          contentType: contentType ?? undefined,
+        }),
+        contentType,
+        fileName,
+        tokenExpiresAt: Date.now() + TTL_SECONDS * 1000,
+        paywall: null,
+      };
+    }
+
+    if (paid) {
+      return {
+        mode: "full" as const,
+        kind,
+        url: await buildSignedBucketObjectUrl(video.s3Key, {
+          expiresIn: TTL_SECONDS,
+          contentType: contentType ?? undefined,
+        }),
+        contentType,
+        fileName,
+        tokenExpiresAt: Date.now() + TTL_SECONDS * 1000,
+        paywall: shareLink.paywall,
+      };
+    }
+
+    return {
+      mode: "locked" as const,
+      kind,
+      url: "",
+      contentType,
+      fileName,
+      tokenExpiresAt: null,
+      paywall: shareLink.paywall,
+    };
+  },
+});
+
+/**
  * Image variant of getSharedPaywalledPlayback. For image/gif items the share
  * page asks for a short-TTL signed URL — to the watermarked preview if the
  * grant hasn't paid yet, to the original if it has. Lazy-triggers the sharp
