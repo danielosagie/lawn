@@ -24,7 +24,7 @@ const painPoints = [
     id: "04",
     title: "10 REVIEWERS = 10 SEATS = $$$",
     description:
-      "The director, the producer, the client, the client's wife, the intern who somehow has opinions — they all need access. snip is $5/month flat. Invite literally everyone.",
+      "The director, the producer, the client, the client's wife, the intern who somehow has opinions — they all need access. snip starts at $25/month flat. Invite literally everyone.",
   },
 ];
 
@@ -75,7 +75,7 @@ export default function ForVideoEditors() {
               START FREE TRIAL
             </Link>
             <div className="flex items-center gap-3 px-4">
-              <span className="text-2xl font-black">$5/mo</span>
+              <span className="text-2xl font-black">$25/mo</span>
               <span className="text-sm font-bold text-[#888] uppercase tracking-wider">
                 flat, not per seat
               </span>
@@ -165,7 +165,7 @@ export default function ForVideoEditors() {
       <section className="px-6 py-24 md:py-32 border-b-2 border-[#1a1a1a] bg-[#FF6600] text-[#f0f0e8]">
         <div className="max-w-5xl mx-auto text-center">
           <h2 className="text-6xl md:text-8xl lg:text-9xl font-black uppercase tracking-tighter leading-[0.85] mb-8">
-            $5/MONTH.
+            $25/MONTH.
             <br />
             <span className="text-[#FFB380]">NOT PER USER.</span>
             <br />
@@ -177,6 +177,9 @@ export default function ForVideoEditors() {
             access for one flat price.
           </p>
           <p className="text-lg font-bold text-[#FFB380]">
+            Need 1TB? Pro is $50/month.
+          </p>
+          <p className="text-lg font-bold text-[#f0f0e8] mt-3">
             Stop paying per-seat tax on collaboration.
           </p>
         </div>

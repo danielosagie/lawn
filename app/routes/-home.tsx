@@ -86,7 +86,7 @@ export default function Homepage() {
 
             <div className="flex flex-col sm:flex-row gap-6 lg:justify-end pb-2 mt-4 lg:mt-0">
               <div className="bg-[#f0f0e8] text-[#1a1a1a] px-6 py-4 md:px-8 md:py-5 border-2 border-[#1a1a1a] shadow-[6px_6px_0px_0px_var(--shadow-color)] md:shadow-[8px_8px_0px_0px_var(--shadow-color)] self-start sm:self-auto">
-                <span className="text-3xl md:text-4xl font-black block leading-none">$5/mo</span>
+                <span className="text-3xl md:text-4xl font-black block leading-none">$25/mo</span>
                 <span className="block text-xs md:text-sm font-bold uppercase tracking-wider text-[#888] mt-1 md:mt-2">Unlimited seats</span>
               </div>
               <Link to="/sign-up"
@@ -105,7 +105,7 @@ export default function Homepage() {
           {[
             { id: "01", title: "OPEN SOURCE", desc: "Fully open source. Read the code, fork it, make it yours." },
             { id: "02", title: "ACTUALLY FAST", desc: "Instant playback. Built for speed, not loading spinners." },
-            { id: "03", title: "FLAT PRICING", desc: "$5 covers the whole agency. Stop counting seats." },
+            { id: "03", title: "FLAT PRICING", desc: "$25 covers the whole agency. Stop counting seats." },
             { id: "04", title: "SIMPLE SHARING", desc: "Just copy the link and send it to your client." },
           ].map((item, i) => (
             <div key={i} className="p-8 lg:p-12 group hover:bg-[#1a1a1a] hover:text-[#f0f0e8] transition-colors flex flex-col">
@@ -196,7 +196,7 @@ export default function Homepage() {
                   <div className="text-5xl font-black tracking-tighter mb-8 text-[#FFB380]">snip</div>
                   
                   <div className="mb-8">
-                    <div className="text-3xl font-black text-[#FFB380]">$5</div>
+                    <div className="text-3xl font-black text-[#FFB380]">$25</div>
                     <div className="text-[#888] font-bold uppercase text-sm tracking-wider">Flat total / month</div>
                   </div>
 
@@ -221,7 +221,7 @@ export default function Homepage() {
                   
                   <div className="mt-12 pt-6 border-t border-[#333]">
                     <span className="block text-sm font-bold text-[#888] uppercase tracking-wider mb-1">Yearly savings (5 users)</span>
-                    <span className="text-4xl font-black text-[#FFB380]">$1,080</span>
+                    <span className="text-4xl font-black text-[#FFB380]">$840</span>
                   </div>
                 </div>
               </div>
@@ -250,10 +250,10 @@ export default function Homepage() {
           </h2>
           
           <div className="flex flex-col md:flex-row gap-8 justify-center items-center">
-            {/* $5 Plan */}
+            {/* Basic — $25/mo */}
             <div className="bg-[#f0f0e8] border-2 border-[#1a1a1a] shadow-[8px_8px_0px_0px_var(--shadow-color)] p-8 w-full max-w-md flex flex-col hover:-translate-y-2 hover:translate-x-2 hover:shadow-[4px_4px_0px_0px_var(--shadow-color)] transition-all">
               <div className="text-xl font-bold uppercase tracking-widest text-[#888] mb-2">Basic</div>
-              <div className="text-6xl font-black tracking-tighter mb-4">$5<span className="text-2xl text-[#888]">/mo</span></div>
+              <div className="text-6xl font-black tracking-tighter mb-4">$25<span className="text-2xl text-[#888]">/mo</span></div>
               <p className="text-lg font-medium text-[#1a1a1a] mb-8">Unlimited everything, except storage.</p>
               
               <ul className="space-y-4 text-lg font-bold flex-grow mb-8">
@@ -266,13 +266,13 @@ export default function Homepage() {
               <Link to="/sign-up" className="bg-[#1a1a1a] text-[#f0f0e8] text-center py-4 border-2 border-[#1a1a1a] font-black uppercase hover:bg-[#FF6600] transition-colors">Get Basic</Link>
             </div>
 
-            {/* $25 Plan */}
+            {/* Pro — $50/mo */}
             <div className="bg-[#1a1a1a] text-[#f0f0e8] border-2 border-[#1a1a1a] shadow-[8px_8px_0px_0px_var(--shadow-color)] p-8 w-full max-w-md flex flex-col transform md:-translate-y-4 hover:-translate-y-6 hover:translate-x-2 hover:shadow-[4px_4px_0px_0px_var(--shadow-color)] transition-all">
               <div className="flex justify-between items-start mb-2">
                 <div className="text-xl font-bold uppercase tracking-widest text-[#FFB380]">Pro</div>
                 <div className="bg-[#FF6600] text-xs font-black px-2 py-1 uppercase tracking-wider -rotate-3">Big files</div>
               </div>
-              <div className="text-6xl font-black tracking-tighter mb-4">$25<span className="text-2xl text-[#888]">/mo</span></div>
+              <div className="text-6xl font-black tracking-tighter mb-4">$50<span className="text-2xl text-[#888]">/mo</span></div>
               <p className="text-lg font-medium mb-8">Literally the exact same thing but more space.</p>
               
               <ul className="space-y-4 text-lg font-bold flex-grow mb-8">
@@ -295,7 +295,7 @@ export default function Homepage() {
             START<br/>NOW.
           </h2>
           <p className="text-2xl text-[#888] font-medium mb-12">
-            Basic is $5/month. Pro is $25/month.
+            Basic is $25/month. Pro is $50/month.
           </p>
           <Link to="/sign-up"
             className="bg-[#1a1a1a] text-[#f0f0e8] px-12 py-6 border-2 border-[#1a1a1a] text-2xl font-black uppercase tracking-wider hover:bg-[#FF6600] hover:border-[#FF6600] transition-colors shadow-[12px_12px_0px_0px_var(--shadow-accent)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[8px_8px_0px_0px_var(--shadow-accent)]"
@@ -324,7 +324,7 @@ export default function Homepage() {
               {
                 "@type": "Offer",
                 name: "Basic",
-                price: "5.00",
+                price: "25.00",
                 priceCurrency: "USD",
                 description:
                   "Unlimited seats, unlimited projects, unlimited clients, 100GB storage",
@@ -332,7 +332,7 @@ export default function Homepage() {
               {
                 "@type": "Offer",
                 name: "Pro",
-                price: "25.00",
+                price: "50.00",
                 priceCurrency: "USD",
                 description:
                   "Unlimited seats, unlimited projects, unlimited clients, 1TB storage",

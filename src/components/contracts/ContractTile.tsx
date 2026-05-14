@@ -6,11 +6,11 @@ import { api } from "@convex/_generated/api";
 import {
   FileSignature,
   Check,
-  AlertCircle,
   FileText,
   Send,
   MoreVertical,
   Trash2,
+  Plus,
 } from "lucide-react";
 import { Id } from "@convex/_generated/dataModel";
 import {
@@ -147,9 +147,13 @@ export function ContractTile({
               Sent
             </span>
           ) : status === "missing" ? (
-            <span className="px-1.5 py-0.5 bg-[#dc2626] text-[#f0f0e8] text-[10px] font-bold uppercase inline-flex items-center gap-1">
-              <AlertCircle className="h-3 w-3" />
-              Missing
+            // No contract yet — show a quiet "add" affordance, not a
+            // red "missing" alarm. Deletion is final; this tile lives
+            // as the project's contract slot whether or not anyone's
+            // drafted into it yet.
+            <span className="px-1.5 py-0.5 bg-[#f0f0e8] text-[#1a1a1a] text-[10px] font-bold uppercase inline-flex items-center gap-1">
+              <Plus className="h-3 w-3" />
+              Draft
             </span>
           ) : null}
         </div>

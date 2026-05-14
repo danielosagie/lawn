@@ -127,7 +127,7 @@ const images: { name: string; jsx: ReturnType<typeof TextOverlay> }[] = [
       <TextOverlay
         title="lawn vs Frame.io"
         titleSize={96}
-        subtitle="$5/mo flat vs $19/user/mo"
+        subtitle="$25/mo flat vs $19/user/mo"
       />
     ),
   },
@@ -164,7 +164,7 @@ const images: { name: string; jsx: ReturnType<typeof TextOverlay> }[] = [
   {
     name: "pricing",
     jsx: (
-      <TextOverlay title="$5/mo" titleSize={220} subtitle="Unlimited everything" />
+      <TextOverlay title="$25/mo" titleSize={220} subtitle="Pro $50 · 1TB" />
     ),
   },
 ];

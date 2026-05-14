@@ -2,13 +2,13 @@ import { Link } from "@tanstack/react-router";
 import { MarketingLayout } from "@/components/MarketingLayout";
 
 const FRAMEIO_PRICE_PER_USER = 19;
-const SNIP_PRICE_FLAT = 5;
+const SNIP_PRICE_FLAT = 25;
 
 const comparisonRows = [
   {
     feature: "Price",
     frameio: "$19/user/month",
-    snip: "$5/month. Total.",
+    snip: "$25/month. Total.",
     note: "Math is hard, but not that hard.",
   },
   {
@@ -80,7 +80,7 @@ export default function CompareFrameio() {
             <p className="mt-6 text-lg text-[var(--foreground-muted)] font-medium max-w-lg">
               Frame.io is a great product built for enterprise teams with
               enterprise budgets. snip is a scrappy little tool that does the
-              important stuff for $5/month flat. No per-seat math. No PhD in
+              important stuff for $25/month flat. No per-seat math. No PhD in
               procurement required.
             </p>
           </div>
@@ -149,8 +149,8 @@ export default function CompareFrameio() {
             MATH.
           </h2>
           <p className="text-center text-lg text-[var(--foreground-muted)] font-medium mb-16 max-w-lg mx-auto">
-            Frame.io charges $19 per user per month. snip charges $5 per month.
-            Not per user. Just $5. Here's what that means annually.
+            Frame.io charges $19 per user per month. snip starts at $25 per month.
+            Not per user. Flat pricing. Here's what that means annually.
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -338,7 +338,7 @@ export default function CompareFrameio() {
             NOW.
           </h2>
           <p className="text-xl md:text-2xl text-[var(--foreground-muted)] font-medium mb-12 max-w-md">
-            $5/month. Unlimited seats. No sales call required. No credit card to
+            $25/month. Unlimited seats. No sales call required. No credit card to
             start.
           </p>
           <Link

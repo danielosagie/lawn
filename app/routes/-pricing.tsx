@@ -11,7 +11,7 @@ export default function PricingPage() {
             PRICING.
           </h1>
           <p className="text-2xl md:text-3xl font-bold mt-8 max-w-2xl">
-            $5/month. Not per user. Not per project.{" "}
+            $25/month. Not per user. Not per project.{" "}
             <span className="text-[#888]">Total.</span>
           </p>
         </div>
@@ -27,7 +27,7 @@ export default function PricingPage() {
                 Basic
               </div>
               <div className="text-6xl font-black tracking-tighter mb-4">
-                $5<span className="text-2xl text-[#888]">/mo</span>
+                $25<span className="text-2xl text-[#888]">/mo</span>
               </div>
               <p className="text-lg font-medium text-[#1a1a1a] mb-8">
                 Unlimited everything, except storage.
@@ -71,7 +71,7 @@ export default function PricingPage() {
                 </div>
               </div>
               <div className="text-6xl font-black tracking-tighter mb-4">
-                $25<span className="text-2xl text-[#888]">/mo</span>
+                $50<span className="text-2xl text-[#888]">/mo</span>
               </div>
               <p className="text-lg font-medium mb-8">
                 Literally the exact same thing but more space.
@@ -159,7 +159,7 @@ export default function PricingPage() {
           </p>
           <Link
             to="/sign-up"
-            className="bg-[#f0f0e8] text-[#1a1a1a] px-12 py-6 border-2 border-[#f0f0e8] text-2xl font-black uppercase tracking-wider hover:bg-[#FF6600] hover:text-[#f0f0e8] hover:border-[#FF6600] transition-colors shadow-[8px_8px_0px_0px_rgba(45,90,45,1)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[4px_4px_0px_0px_rgba(45,90,45,1)]"
+            className="bg-[#f0f0e8] text-[#1a1a1a] px-12 py-6 border-2 border-[#f0f0e8] text-2xl font-black uppercase tracking-wider hover:bg-[#FF6600] hover:text-[#f0f0e8] hover:border-[#FF6600] transition-colors shadow-[8px_8px_0px_0px_var(--shadow-accent)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[4px_4px_0px_0px_var(--shadow-accent)]"
           >
             START FREE TRIAL
           </Link>

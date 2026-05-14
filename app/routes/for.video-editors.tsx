@@ -7,7 +7,7 @@ export const Route = createFileRoute("/for/video-editors")({
     seoHead({
       title: "Video review for editors — frame-accurate feedback",
       description:
-        "Video review built for editors. Frame-accurate comments, instant playback, no account required for reviewers. $5/month flat.",
+        "Video review built for editors. Frame-accurate comments, instant playback, no account required for reviewers. From $25/month flat.",
       path: "/for/video-editors",
       ogImage: "/og/for-editors.png",
     }),

@@ -271,6 +271,11 @@ export default defineSchema({
     versionNumber: v.optional(v.number()),
     isCurrentVersion: v.optional(v.boolean()),
     versionLabel: v.optional(v.string()),
+    // Soft-delete marker. When set, the video disappears from project /
+    // folder listings and shows up in the "Recently deleted" page where
+    // it can be restored or purged. Mirrors the same pattern on projects.
+    deletedAt: v.optional(v.number()),
+    deletedByName: v.optional(v.string()),
   })
     .index("by_project", ["projectId"])
     .index("by_public_id", ["publicId"])
@@ -521,6 +526,30 @@ export default defineSchema({
   })
     .index("by_project", ["projectId"])
     .index("by_project_and_version", ["projectId", "versionNumber"]),
+
+  /**
+   * Soft-deleted contracts. When a user "deletes" a contract from a
+   * project we snapshot the whole contract object here and clear the
+   * project's `contract` field. Restore copies the snapshot back to
+   * the project and removes the row; purge just removes the row.
+   *
+   * teamId is denormalized so the trash query can scope by team
+   * membership without re-fetching the parent project (which may
+   * itself be soft-deleted).
+   */
+  trashedContracts: defineTable({
+    projectId: v.id("projects"),
+    teamId: v.id("teams"),
+    projectName: v.string(),
+    // Raw contract blob, identical shape to `projects.contract`.
+    contract: v.any(),
+    deletedAt: v.number(),
+    deletedByClerkId: v.string(),
+    deletedByName: v.optional(v.string()),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_team", ["teamId"])
+    .index("by_team_and_deleted_at", ["teamId", "deletedAt"]),
 
   projectVersions: defineTable({
     projectId: v.id("projects"),

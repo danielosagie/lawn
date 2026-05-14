@@ -2,13 +2,13 @@ import { Link } from "@tanstack/react-router";
 import { MarketingLayout } from "@/components/MarketingLayout";
 
 const WIPSTER_PRICE_PER_USER = 15;
-const SNIP_PRICE_FLAT = 5;
+const SNIP_PRICE_FLAT = 25;
 
 const comparisonRows = [
   {
     feature: "Pricing",
     wipster: "Per-user/month",
-    snip: "$5/month. Total.",
+    snip: "$25/month. Total.",
     note: "Your accountant will love you.",
   },
   {
@@ -149,8 +149,8 @@ export default function CompareWipster() {
             MATH.
           </h2>
           <p className="text-center text-lg text-[var(--foreground-muted)] font-medium mb-16 max-w-lg mx-auto">
-            Wipster charges per user. snip charges $5 per month total. Not per
-            user. Just $5. The math gets increasingly silly as your team grows.
+            Wipster charges per user. snip starts at $25 per month total. Not per
+            user. Flat pricing. The math gets increasingly silly as your team grows.
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -362,7 +362,7 @@ export default function CompareWipster() {
             NOW.
           </h2>
           <p className="text-xl md:text-2xl text-[var(--foreground-muted)] font-medium mb-12 max-w-md">
-            $5/month. Unlimited seats. Open source. No per-user nonsense.
+            $25/month. Unlimited seats. Open source. No per-user nonsense.
           </p>
           <Link
             to="/sign-up"

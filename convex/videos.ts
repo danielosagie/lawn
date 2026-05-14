@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { internalMutation, internalQuery, mutation, query, MutationCtx } from "./_generated/server";
-import { identityName, requireProjectAccess, requireVideoAccess } from "./auth";
+import { getUser, identityName, requireProjectAccess, requireVideoAccess } from "./auth";
 import { Doc, Id } from "./_generated/dataModel";
 import { generateUniqueToken } from "./security";
 import { resolveActiveShareGrant } from "./shareAccess";
@@ -109,14 +109,17 @@ export const list = query({
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .order("desc")
       .collect();
+    // Drop soft-deleted videos — they live in Recently deleted now,
+    // not in the project / folder grid.
+    const liveInProject = allInProject.filter((v) => !v.deletedAt);
     // Apply folder filter in-memory. The dual-key Convex index would
     // require an explicit by_project_and_folder index; for now the in-mem
     // filter is fine since per-project video count stays modest. If lists
     // grow large we'll add the index.
     const all =
       args.folderId === undefined
-        ? allInProject
-        : allInProject.filter((v) =>
+        ? liveInProject
+        : liveInProject.filter((v) =>
             args.folderId === null
               ? !v.folderId
               : v.folderId === args.folderId,
@@ -186,7 +189,12 @@ export const getByPublicId = query({
       .withIndex("by_public_id", (q) => q.eq("publicId", args.publicId))
       .unique();
 
-    if (!video || video.visibility !== "public" || video.status !== "ready") {
+    if (
+      !video ||
+      video.deletedAt ||
+      video.visibility !== "public" ||
+      video.status !== "ready"
+    ) {
       return null;
     }
 
@@ -214,7 +222,7 @@ export const getByPublicIdForDownload = query({
       .withIndex("by_public_id", (q) => q.eq("publicId", args.publicId))
       .unique();
 
-    if (!video || video.visibility !== "public") {
+    if (!video || video.deletedAt || video.visibility !== "public") {
       return null;
     }
 
@@ -240,7 +248,13 @@ export const getPublicIdByVideoId = query({
     }
 
     const video = await ctx.db.get(normalizedVideoId);
-    if (!video || video.visibility !== "public" || video.status !== "ready" || !video.publicId) {
+    if (
+      !video ||
+      video.deletedAt ||
+      video.visibility !== "public" ||
+      video.status !== "ready" ||
+      !video.publicId
+    ) {
       return null;
     }
 
@@ -257,7 +271,7 @@ export const getByShareGrant = query({
     }
 
     const video = await ctx.db.get(resolved.shareLink.videoId);
-    if (!video || video.status !== "ready") {
+    if (!video || video.deletedAt || video.status !== "ready") {
       return null;
     }
 
@@ -287,7 +301,7 @@ export const getByShareGrantForDownload = query({
     }
 
     const video = await ctx.db.get(resolved.shareLink.videoId);
-    if (!video) {
+    if (!video || video.deletedAt) {
       return null;
     }
 
@@ -464,9 +478,11 @@ export const listVersions = query({
       .query("videos")
       .withIndex("by_lineage", (q) => q.eq("lineageId", lineageId))
       .collect();
+    // Skip soft-deleted versions — they live in Recently deleted.
+    const liveRows = fromIndex.filter((v) => !v.deletedAt);
     // Pre-lineage row case: video itself isn't yet tagged, no siblings
     // exist. Synthesize a single-row response.
-    const rows = fromIndex.length > 0 ? fromIndex : [video];
+    const rows = liveRows.length > 0 ? liveRows : video.deletedAt ? [] : [video];
     return rows
       .map((v) => ({
         _id: v._id,
@@ -614,10 +630,67 @@ export const updateWorkflowStatus = mutation({
   },
 });
 
+/**
+ * Soft-delete a video — sets `deletedAt` so it disappears from project
+ * + folder listings but the row itself, comments, share links, and Mux
+ * assets stay intact for restore. The "Recently deleted" page lists
+ * trashed videos and lets the team admin restore or purge them.
+ *
+ * Hard delete still happens via `purge` (callable only from the
+ * trash UI, or as a side-effect of purging the parent project).
+ */
 export const remove = mutation({
   args: { videoId: v.id("videos") },
   handler: async (ctx, args) => {
-    await requireVideoAccess(ctx, args.videoId, "admin");
+    const { user } = await requireVideoAccess(ctx, args.videoId, "admin");
+    const name = identityName(user);
+    await ctx.db.patch(args.videoId, {
+      deletedAt: Date.now(),
+      deletedByName: name,
+    });
+  },
+});
+
+/**
+ * Lift a video out of the trash. Clears the soft-delete markers so
+ * it appears back in its project's grid. If the parent project itself
+ * has been trashed we refuse — restore the project first so the video
+ * has a folder to land in.
+ */
+export const restore = mutation({
+  args: { videoId: v.id("videos") },
+  handler: async (ctx, args) => {
+    const { video, project } = await requireVideoAccess(
+      ctx,
+      args.videoId,
+      "admin",
+    );
+    if (project.deletedAt) {
+      throw new Error(
+        "The project this video belongs to is also in the trash. Restore the project first.",
+      );
+    }
+    if (!video.deletedAt) return;
+    await ctx.db.patch(args.videoId, {
+      deletedAt: undefined,
+      deletedByName: undefined,
+    });
+  },
+});
+
+/**
+ * Permanently delete a soft-deleted video. Cascades through comments,
+ * share links, and share-access grants — same path the old hard-delete
+ * used. Refuses if the video hasn't been trashed first so accidental
+ * "permanent delete" clicks are scoped to the trash UI.
+ */
+export const purge = mutation({
+  args: { videoId: v.id("videos") },
+  handler: async (ctx, args) => {
+    const { video } = await requireVideoAccess(ctx, args.videoId, "admin");
+    if (!video.deletedAt) {
+      throw new Error("Move the video to the trash first.");
+    }
 
     const comments = await ctx.db
       .query("comments")
@@ -637,6 +710,76 @@ export const remove = mutation({
     }
 
     await ctx.db.delete(args.videoId);
+  },
+});
+
+/**
+ * Trash listing for the current user — every soft-deleted video
+ * across every team they belong to. Mirrors `projects.listDeleted` so
+ * the Recently deleted page can show projects + videos in one feed.
+ */
+export const listDeleted = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await getUser(ctx);
+    if (!user) return [];
+
+    const memberships = await ctx.db
+      .query("teamMembers")
+      .withIndex("by_user", (q) => q.eq("userClerkId", user.subject))
+      .collect();
+
+    const all: Array<{
+      _id: Id<"videos">;
+      title: string;
+      projectId: Id<"projects">;
+      projectName: string;
+      projectDeleted: boolean;
+      teamId: Id<"teams">;
+      teamName: string;
+      teamSlug: string;
+      deletedAt: number;
+      deletedByName?: string;
+      thumbnailUrl?: string;
+    }> = [];
+
+    for (const m of memberships) {
+      const team = await ctx.db.get(m.teamId);
+      if (!team) continue;
+      const projects = await ctx.db
+        .query("projects")
+        .withIndex("by_team", (q) => q.eq("teamId", m.teamId))
+        .collect();
+      for (const project of projects) {
+        const videos = await ctx.db
+          .query("videos")
+          .withIndex("by_project", (q) => q.eq("projectId", project._id))
+          .collect();
+        for (const video of videos) {
+          if (typeof video.deletedAt !== "number") continue;
+          // Hide videos whose only path to restoration is via the
+          // project trash — they'll come back when the project does.
+          // Showing them separately would double-count.
+          if (project.deletedAt) continue;
+          all.push({
+            _id: video._id,
+            title: video.title,
+            projectId: project._id,
+            projectName: project.name,
+            projectDeleted: !!project.deletedAt,
+            teamId: team._id,
+            teamName: team.name,
+            teamSlug: team.slug,
+            deletedAt: video.deletedAt,
+            deletedByName: video.deletedByName,
+            thumbnailUrl: video.thumbnailUrl,
+          });
+        }
+      }
+    }
+
+    all.sort((a, b) => b.deletedAt - a.deletedAt);
+    return all;
   },
 });
 

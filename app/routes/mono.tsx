@@ -51,7 +51,7 @@ export default function HomepageMono() {
           {/* Key differentiator */}
           <div className="mt-12 flex flex-wrap gap-6 items-center">
             <div className="bg-[#FF6600] text-[#f0f0e8] px-6 py-4">
-              <span className="text-3xl font-black">$5/mo</span>
+              <span className="text-3xl font-black">$25/mo</span>
               <span className="text-sm ml-2 opacity-70">unlimited seats</span>
             </div>
             <Link to="/sign-up"
@@ -98,13 +98,13 @@ export default function HomepageMono() {
                 </div>
                 <div>
                   <div className="text-[#FFB380] text-sm mb-1">snip</div>
-                  <div className="text-2xl font-black text-[#FFB380]">$5/mo total</div>
-                  <div className="text-sm text-[#888] mt-2">Team of 5 = $60/year</div>
+                  <div className="text-2xl font-black text-[#FFB380]">$25/mo total</div>
+                  <div className="text-sm text-[#888] mt-2">Team of 5 = $300/year</div>
                 </div>
               </div>
               <div className="mt-6 pt-6 border-t border-[#333]">
                 <span className="text-sm text-[#888]">Annual savings with 5 users: </span>
-                <span className="text-xl font-black text-[#FFB380]">$1,080</span>
+                <span className="text-xl font-black text-[#FFB380]">$840</span>
               </div>
             </div>
 
@@ -174,7 +174,7 @@ export default function HomepageMono() {
             Pick your plan
           </h2>
           <p className="text-xl text-[#888] mt-4 mb-8">
-            Basic is $5/month. Pro is $25/month.
+            Basic is $25/month. Pro is $50/month.
           </p>
           <Link to="/sign-up"
             className="inline-block bg-[#FF6600] text-[#f0f0e8] px-12 py-5 text-xl font-black hover:bg-[#FF7A1F] transition-colors"

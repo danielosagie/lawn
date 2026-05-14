@@ -1,7 +1,12 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
-import { getUser, requireTeamAccess, requireProjectAccess } from "./auth";
+import {
+  getUser,
+  identityName,
+  requireTeamAccess,
+  requireProjectAccess,
+} from "./auth";
 import { assertTeamHasActiveSubscription } from "./billingHelpers";
 
 export const create = mutation({
@@ -209,11 +214,133 @@ export const signContractDemo = mutation({
   },
 });
 
+/**
+ * Soft-delete the contract attached to a project. Snapshots the whole
+ * contract blob into `trashedContracts` so the user can restore it from
+ * "Recently deleted" later — and only then unsets the field on the
+ * project so the project's contract tile flips back to the empty
+ * "Draft" state.
+ *
+ * No-op if the project has no contract attached (avoids creating an
+ * empty trashed row).
+ */
 export const clearContract = mutation({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args) => {
-    await requireProjectAccess(ctx, args.projectId, "admin");
+    const { user, project } = await requireProjectAccess(
+      ctx,
+      args.projectId,
+      "admin",
+    );
+    if (!project.contract) return;
+    await ctx.db.insert("trashedContracts", {
+      projectId: args.projectId,
+      teamId: project.teamId,
+      projectName: project.name,
+      contract: project.contract,
+      deletedAt: Date.now(),
+      deletedByClerkId: user.subject,
+      deletedByName: identityName(user),
+    });
     await ctx.db.patch(args.projectId, { contract: undefined });
+  },
+});
+
+/**
+ * Restore a trashed contract back onto its project. Refuses if the
+ * project already has a contract (so accidentally restoring an old
+ * snapshot can't silently overwrite an in-progress draft) — the user
+ * can clear the current one first.
+ */
+export const restoreContract = mutation({
+  args: { trashedContractId: v.id("trashedContracts") },
+  handler: async (ctx, args) => {
+    const trashed = await ctx.db.get(args.trashedContractId);
+    if (!trashed) throw new Error("Trashed contract not found.");
+    const { project } = await requireProjectAccess(
+      ctx,
+      trashed.projectId,
+      "admin",
+    );
+    if (project.contract) {
+      throw new Error(
+        "This project already has a contract. Delete it first if you want to restore the older one.",
+      );
+    }
+    await ctx.db.patch(trashed.projectId, {
+      contract: trashed.contract,
+    });
+    await ctx.db.delete(args.trashedContractId);
+  },
+});
+
+/**
+ * Permanently delete a trashed-contract snapshot. The project itself
+ * isn't touched.
+ */
+export const purgeContract = mutation({
+  args: { trashedContractId: v.id("trashedContracts") },
+  handler: async (ctx, args) => {
+    const trashed = await ctx.db.get(args.trashedContractId);
+    if (!trashed) return;
+    await requireProjectAccess(ctx, trashed.projectId, "admin");
+    await ctx.db.delete(args.trashedContractId);
+  },
+});
+
+/**
+ * Lists every trashed contract across the user's teams, sorted by
+ * `deletedAt desc`. Used by the Recently deleted page alongside the
+ * trashed-projects + trashed-videos feeds.
+ */
+export const listDeletedContracts = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await getUser(ctx);
+    if (!user) return [];
+    const memberships = await ctx.db
+      .query("teamMembers")
+      .withIndex("by_user", (q) => q.eq("userClerkId", user.subject))
+      .collect();
+    const all: Array<{
+      _id: Id<"trashedContracts">;
+      projectId: Id<"projects">;
+      projectName: string;
+      projectDeleted: boolean;
+      teamId: Id<"teams">;
+      teamName: string;
+      teamSlug: string;
+      clientName?: string;
+      deletedAt: number;
+      deletedByName?: string;
+    }> = [];
+    for (const m of memberships) {
+      const team = await ctx.db.get(m.teamId);
+      if (!team) continue;
+      const trashed = await ctx.db
+        .query("trashedContracts")
+        .withIndex("by_team", (q) => q.eq("teamId", m.teamId))
+        .collect();
+      for (const t of trashed) {
+        const project = await ctx.db.get(t.projectId);
+        const projectName = project?.name ?? t.projectName;
+        all.push({
+          _id: t._id,
+          projectId: t.projectId,
+          projectName,
+          projectDeleted: !!project?.deletedAt,
+          teamId: team._id,
+          teamName: team.name,
+          teamSlug: team.slug,
+          clientName:
+            (t.contract as { clientName?: string } | undefined)?.clientName,
+          deletedAt: t.deletedAt,
+          deletedByName: t.deletedByName,
+        });
+      }
+    }
+    all.sort((a, b) => b.deletedAt - a.deletedAt);
+    return all;
   },
 });
 
@@ -303,6 +430,15 @@ export const purge = mutation({
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .collect();
     for (const f of folders) await ctx.db.delete(f._id);
+
+    // Any contracts that were soft-deleted off this project also go
+    // when the project itself gets purged — otherwise we leave orphan
+    // trashed-contract rows pointing at a vanished project.
+    const trashedContracts = await ctx.db
+      .query("trashedContracts")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .collect();
+    for (const t of trashedContracts) await ctx.db.delete(t._id);
 
     await ctx.db.delete(args.projectId);
   },

@@ -6,7 +6,7 @@ const painPoints = [
     id: "01",
     title: "ADDING A FREELANCER SHOULDN'T COST $19/MO",
     description:
-      'You hired them for a two-week project. Why are you paying a monthly seat fee? snip is $5/month total. Unlimited seats. Add your whole roster — full-timers, freelancers, that one intern who\'s "really good at Premiere."',
+      'You hired them for a two-week project. Why are you paying a monthly seat fee? snip starts at $25/month total. Unlimited seats. Add your whole roster — full-timers, freelancers, that one intern who\'s "really good at Premiere."',
   },
   {
     id: "02",
@@ -32,22 +32,22 @@ const comparisons = [
   {
     size: "5-PERSON TEAM",
     competitor: "$95",
-    snip: "$5",
-    saved: "$1,080",
+    snip: "$25",
+    saved: "$840",
     commentary: "That's a lot of coffee.",
   },
   {
     size: "10-PERSON TEAM",
     competitor: "$190",
-    snip: "$5",
-    saved: "$2,220",
+    snip: "$25",
+    saved: "$1,980",
     commentary: "A nice camera lens, actually.",
   },
   {
     size: "15 + FREELANCERS",
     competitor: "$285+",
-    snip: "$5",
-    saved: "$3,360+",
+    snip: "$25",
+    saved: "$3,120+",
     commentary: "Almost enough for one more freelancer.",
   },
 ];
@@ -79,7 +79,7 @@ export default function ForAgencies() {
               more.
             </p>
             <p className="text-lg text-[#888] font-medium mt-4">
-              snip is video review for creative teams. Unlimited seats. $5/month.
+              snip is video review for creative teams. Unlimited seats. From $25/month.
               The whole agency, not per editor.
             </p>
           </div>
@@ -92,7 +92,7 @@ export default function ForAgencies() {
             </Link>
             <div className="bg-[#f0f0e8] border-2 border-[#1a1a1a] px-8 py-5 shadow-[8px_8px_0px_0px_var(--shadow-color)]">
               <span className="text-3xl font-black block leading-none">
-                $5/mo
+                $25/mo
               </span>
               <span className="text-xs font-bold uppercase tracking-wider text-[#888] mt-1 block">
                 Unlimited seats. Seriously.
@@ -151,7 +151,7 @@ export default function ForAgencies() {
                 MATH.
               </h2>
               <p className="text-xl text-[#888] font-medium max-w-sm">
-                Frame.io charges $19/user/month. snip charges $5/month total.
+                Frame.io charges $19/user/month. snip starts at $25/month total.
                 Here's what that looks like at agency scale.
               </p>
             </div>
@@ -234,7 +234,7 @@ export default function ForAgencies() {
             TEAM.
           </h2>
           <p className="text-xl md:text-2xl font-medium mb-4 max-w-lg">
-            $5/month. Unlimited seats. Unlimited projects. No per-user pricing.
+            From $25/month. Unlimited seats. Unlimited projects. No per-user pricing.
             Ever.
           </p>
           <p className="text-lg text-[#f0f0e8]/60 font-medium mb-12">

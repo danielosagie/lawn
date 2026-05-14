@@ -7,7 +7,7 @@ export const Route = createFileRoute("/compare/wipster")({
     seoHead({
       title: "snip vs Wipster — simpler video review, flat pricing",
       description:
-        "Compare snip and Wipster. Flat $5/month vs per-user pricing. Open source, instant playback, unlimited seats. The simpler alternative.",
+        "Compare snip and Wipster. Flat pricing from $25/month vs per-user pricing. Open source, instant playback, unlimited seats. The simpler alternative.",
       path: "/compare/wipster",
       ogImage: "/og/compare-wipster.png",
     }),
