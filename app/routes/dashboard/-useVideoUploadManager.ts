@@ -32,11 +32,24 @@ export function useVideoUploadManager() {
   const [uploads, setUploads] = useState<ManagedUploadItem[]>([]);
 
   const uploadFilesToProject = useCallback(
-    async (projectId: Id<"projects">, files: File[]) => {
+    async (
+      projectId: Id<"projects">,
+      files: File[],
+      folderId?: Id<"folders">,
+    ) => {
       for (const file of files) {
         const uploadId = createUploadId();
         const title = file.name.replace(/\.[^/.]+$/, "");
         const abortController = new AbortController();
+        // Pick the best content-type guess the browser gave us. If it
+        // couldn't determine one (common for .prproj, .blend, .fcpxml,
+        // etc.) fall back to a neutral binary type so the backend
+        // routes the upload through the generic-file path instead of
+        // trying to feed it to Mux as "video/mp4".
+        const inferredContentType =
+          file.type && file.type.trim().length > 0
+            ? file.type
+            : "application/octet-stream";
 
         setUploads((prev) => [
           ...prev,
@@ -57,7 +70,8 @@ export function useVideoUploadManager() {
             projectId,
             title,
             fileSize: file.size,
-            contentType: file.type || "video/mp4",
+            contentType: inferredContentType,
+            folderId,
           });
 
           setUploads((prev) =>
@@ -72,7 +86,7 @@ export function useVideoUploadManager() {
             videoId: createdVideoId,
             filename: file.name,
             fileSize: file.size,
-            contentType: file.type || "video/mp4",
+            contentType: inferredContentType,
           });
 
           await new Promise<void>((resolve, reject) => {
@@ -140,7 +154,7 @@ export function useVideoUploadManager() {
             });
 
             xhr.open("PUT", url);
-            xhr.setRequestHeader("Content-Type", file.type || "video/mp4");
+            xhr.setRequestHeader("Content-Type", inferredContentType);
             xhr.send(file);
           });
 

@@ -1,4 +1,4 @@
-import { useAction, useMutation } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { Link, useParams } from "@tanstack/react-router";
 import { useUser } from "@clerk/tanstack-react-start";
@@ -12,8 +12,23 @@ import { triggerDownload } from "@/lib/download";
 import { formatDuration, formatTimestamp, formatRelativeTime } from "@/lib/utils";
 import { useVideoPresence } from "@/lib/useVideoPresence";
 import { VideoWatchers } from "@/components/presence/VideoWatchers";
-import { Lock, Video, AlertCircle, MessageSquare, Clock, Download } from "lucide-react";
+import { Lock, Video, AlertCircle, MessageSquare, Clock, Download, ShieldCheck } from "lucide-react";
 import { useShareData } from "./-share.data";
+import {
+  ShareWatermarkOverlay,
+  useAntiPiracyDefenses,
+} from "@/components/share/ShareWatermarkOverlay";
+
+function formatPrice(cents: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: currency.toUpperCase(),
+    }).format(cents / 100);
+  } catch {
+    return `${(cents / 100).toFixed(2)} ${currency.toUpperCase()}`;
+  }
+}
 
 export default function SharePage() {
   const params = useParams({ strict: false });
@@ -22,8 +37,13 @@ export default function SharePage() {
 
   const issueAccessGrant = useMutation(api.shareLinks.issueAccessGrant);
   const createComment = useMutation(api.comments.createForShareGrant);
-  const getPlaybackSession = useAction(api.videoActions.getSharedPlaybackSession);
+  const getPaywalledPlayback = useAction(api.videoActions.getSharedPaywalledPlayback);
+  const createCheckoutForGrant = useAction(
+    api.paymentsActions.createCheckoutForGrant,
+  );
+  const simulatePayment = useMutation(api.demoSeed.simulatePaymentForGrant);
   const getDownloadUrl = useAction(api.videoActions.getSharedDownloadUrl);
+  const demoStatus = useQuery(api.demoSeed.isDemoMode, {});
 
   const [grantToken, setGrantToken] = useState<string | null>(null);
   const [hasAttemptedAutoGrant, setHasAttemptedAutoGrant] = useState(false);
@@ -33,9 +53,18 @@ export default function SharePage() {
   const [playbackSession, setPlaybackSession] = useState<{
     url: string;
     posterUrl: string;
+    mode: "public" | "preview" | "full";
+    tokenExpiresAt: number | null;
   } | null>(null);
   const [isLoadingPlayback, setIsLoadingPlayback] = useState(false);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
+  const [paywall, setPaywall] = useState<{
+    priceCents: number;
+    currency: string;
+    description?: string;
+  } | null>(null);
+  const [isCreatingCheckout, setIsCreatingCheckout] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [commentText, setCommentText] = useState("");
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
@@ -43,6 +72,17 @@ export default function SharePage() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const playerRef = useRef<VideoPlayerHandle | null>(null);
+
+  // Live unlock-state subscription. Convex reactivity flips this from
+  // paid:false to paid:true the instant the Stripe webhook fires, with no
+  // polling.
+  const unlockState = useQuery(
+    api.payments.getGrantUnlockState,
+    grantToken ? { grantToken } : "skip",
+  );
+
+  const isPaywalled = playbackSession?.mode === "preview" || playbackSession?.mode === "full";
+  const { suspectAutomation } = useAntiPiracyDefenses(Boolean(isPaywalled));
 
   useEffect(() => {
     setIsDownloading(false);
@@ -95,10 +135,18 @@ export default function SharePage() {
     void acquireGrant();
   }, [acquireGrant, grantToken, hasAttemptedAutoGrant, shareInfo]);
 
+  // Load (and re-load) the playback session. Re-runs when unlockState.paid
+  // flips so payment immediately swaps preview → full-res. Also re-runs as
+  // signed-token expiry approaches via the heartbeat below.
+  const reloadCounter = useRef(0);
+  const [reloadTrigger, setReloadTrigger] = useState(0);
+  const paidFlag = Boolean(unlockState?.paid);
+
   useEffect(() => {
     if (!grantToken) {
       setPlaybackSession(null);
       setPlaybackError(null);
+      setPaywall(null);
       return;
     }
 
@@ -106,14 +154,22 @@ export default function SharePage() {
     setIsLoadingPlayback(true);
     setPlaybackError(null);
 
-    void getPlaybackSession({ grantToken })
+    void getPaywalledPlayback({ grantToken })
       .then((session) => {
         if (cancelled) return;
-        setPlaybackSession(session);
+        setPlaybackSession({
+          url: session.url,
+          posterUrl: session.posterUrl,
+          mode: session.mode,
+          tokenExpiresAt: session.tokenExpiresAt,
+        });
+        setPaywall(session.paywall);
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (cancelled) return;
-        setPlaybackError("Unable to load playback session.");
+        setPlaybackError(
+          err instanceof Error ? err.message : "Unable to load playback session.",
+        );
       })
       .finally(() => {
         if (cancelled) return;
@@ -123,7 +179,89 @@ export default function SharePage() {
     return () => {
       cancelled = true;
     };
-  }, [getPlaybackSession, grantToken]);
+  }, [getPaywalledPlayback, grantToken, paidFlag, reloadTrigger]);
+
+  // Heartbeat — refresh the signed Mux JWT before it expires. Token TTL is
+  // 5 minutes; refresh at 4 minutes.
+  useEffect(() => {
+    if (!playbackSession?.tokenExpiresAt) return;
+    const msUntilRefresh = Math.max(
+      30_000,
+      playbackSession.tokenExpiresAt - Date.now() - 60_000,
+    );
+    const timer = window.setTimeout(() => {
+      reloadCounter.current += 1;
+      setReloadTrigger((n) => n + 1);
+    }, msUntilRefresh);
+    return () => window.clearTimeout(timer);
+  }, [playbackSession?.tokenExpiresAt]);
+
+  const handlePay = useCallback(async () => {
+    if (!grantToken || isCreatingCheckout) return;
+    setIsCreatingCheckout(true);
+    setCheckoutError(null);
+
+    // Demo bypass: if Stripe isn't configured, simulate the payment on the
+    // server (flip grant.paidAt directly). Lets you exercise the full
+    // preview → paid swap without standing up Stripe.
+    const stripeConfigured = demoStatus?.stripeConfigured ?? false;
+    if (!stripeConfigured) {
+      try {
+        const result = await simulatePayment({ grantToken });
+        if (result.status === "ok" || result.status === "alreadyPaid") {
+          setReloadTrigger((n) => n + 1);
+        } else if (result.status === "noPaywall") {
+          setCheckoutError("This link is not paywalled.");
+        } else if (result.status === "invalidGrant") {
+          setCheckoutError("Session expired. Please reload.");
+        } else if (result.status === "stripeIsConfigured") {
+          // Should not happen because we checked above, but fall through.
+        }
+      } catch (err) {
+        setCheckoutError(
+          err instanceof Error ? err.message : "Demo payment failed.",
+        );
+      } finally {
+        setIsCreatingCheckout(false);
+      }
+      return;
+    }
+
+    try {
+      const result = await createCheckoutForGrant({
+        grantToken,
+        successUrl: `${window.location.origin}/share/${token}?paid=1`,
+        cancelUrl: `${window.location.origin}/share/${token}`,
+      });
+      if (result.status === "ok" && result.url) {
+        window.location.href = result.url;
+        return;
+      }
+      const reasons: Record<typeof result.status, string> = {
+        ok: "",
+        disabled: "Payments aren't configured on this deployment.",
+        noPaywall: "This link is not paywalled.",
+        alreadyPaid: "Already unlocked — reloading…",
+        teamNotConnected: "The agency hasn't connected Stripe yet.",
+        invalidGrant: "Session expired. Please reload.",
+      };
+      setCheckoutError(result.reason ?? reasons[result.status]);
+      if (result.status === "alreadyPaid") {
+        setReloadTrigger((n) => n + 1);
+      }
+    } catch (err) {
+      setCheckoutError(err instanceof Error ? err.message : "Could not start checkout.");
+    } finally {
+      setIsCreatingCheckout(false);
+    }
+  }, [
+    createCheckoutForGrant,
+    demoStatus?.stripeConfigured,
+    grantToken,
+    isCreatingCheckout,
+    simulatePayment,
+    token,
+  ]);
 
   const flattenedComments = useMemo(() => {
     if (!comments) return [] as Array<{ _id: string; timestampSeconds: number; resolved: boolean }>;
@@ -216,7 +354,7 @@ export default function SharePage() {
           <CardContent>
             <Link to="/" preload="intent" className="block">
               <Button variant="outline" className="w-full">
-                Go to lawn
+                Go to snip
               </Button>
             </Link>
           </CardContent>
@@ -285,6 +423,29 @@ export default function SharePage() {
   }
 
   const video = videoData.video;
+  const isPreviewMode = playbackSession?.mode === "preview";
+  const isFullMode = playbackSession?.mode === "full";
+  const isPaid = Boolean(unlockState?.paid);
+  const downloadAllowed = !paywall || isPaid;
+
+  if (suspectAutomation && (isPreviewMode || isFullMode)) {
+    return (
+      <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+        <Card className="max-w-md w-full">
+          <CardHeader className="text-center">
+            <div className="mx-auto w-12 h-12 bg-[#dc2626]/10 flex items-center justify-center mb-4 border-2 border-[#dc2626]">
+              <ShieldCheck className="h-6 w-6 text-[#dc2626]" />
+            </div>
+            <CardTitle>Automation blocked</CardTitle>
+            <CardDescription>
+              Paywalled deliveries cannot be opened from automated browsers.
+              Open this link in a normal browser session.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#f0f0e8]">
@@ -295,13 +456,14 @@ export default function SharePage() {
             to="/"
             className="text-[#888] hover:text-[#1a1a1a] text-sm flex items-center gap-2 font-bold"
           >
-            lawn
+            snip
           </Link>
           <Button
             variant="outline"
             size="sm"
             onClick={() => void handleDownload()}
-            disabled={!grantToken || isDownloading}
+            disabled={!grantToken || isDownloading || !downloadAllowed}
+            title={!downloadAllowed ? "Pay to unlock download" : undefined}
           >
             <Download className="h-4 w-4" />
             {isDownloading ? "Preparing..." : "Download"}
@@ -331,16 +493,75 @@ export default function SharePage() {
           </div>
         </div>
 
-        <div className="border-2 border-[#1a1a1a] overflow-hidden">
+        {paywall && isPreviewMode ? (
+          <section className="border-2 border-[#1a1a1a] bg-[#FF6600] text-[#f0f0e8] p-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-xs font-mono uppercase tracking-widest opacity-80">
+                {demoStatus && !demoStatus.stripeConfigured
+                  ? "Demo mode — simulated payment"
+                  : "Preview only — paywalled delivery"}
+              </div>
+              <div className="font-black text-2xl tracking-tight">
+                {formatPrice(paywall.priceCents, paywall.currency)} to unlock full
+                quality
+              </div>
+              {paywall.description ? (
+                <div className="text-sm opacity-90 mt-1">{paywall.description}</div>
+              ) : null}
+            </div>
+            <div className="flex flex-col items-stretch sm:items-end gap-2">
+              <Button
+                onClick={() => void handlePay()}
+                disabled={isCreatingCheckout}
+                className="bg-[#f0f0e8] text-[#1a1a1a] hover:bg-white"
+              >
+                {isCreatingCheckout
+                  ? demoStatus && !demoStatus.stripeConfigured
+                    ? "Unlocking…"
+                    : "Opening checkout…"
+                  : demoStatus && !demoStatus.stripeConfigured
+                    ? `Simulate paying ${formatPrice(paywall.priceCents, paywall.currency)}`
+                    : `Pay ${formatPrice(paywall.priceCents, paywall.currency)}`}
+              </Button>
+              {checkoutError ? (
+                <div className="text-xs text-[#ffd1d1] max-w-xs text-right">
+                  {checkoutError}
+                </div>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
+
+        {paywall && isFullMode ? (
+          <section className="border-2 border-[#1a1a1a] bg-[#FFB380] text-[#1a1a1a] px-5 py-3 flex items-center gap-2 font-bold">
+            <ShieldCheck className="h-4 w-4" />
+            Paid — full-resolution unlocked
+          </section>
+        ) : null}
+
+        <div className="relative border-2 border-[#1a1a1a] overflow-hidden">
           {playbackSession?.url ? (
-            <VideoPlayer
-              ref={playerRef}
-              src={playbackSession.url}
-              poster={playbackSession.posterUrl}
-              comments={flattenedComments}
-              onTimeUpdate={setCurrentTime}
-              allowDownload={false}
-            />
+            <>
+              <VideoPlayer
+                ref={playerRef}
+                src={playbackSession.url}
+                poster={playbackSession.posterUrl}
+                comments={flattenedComments}
+                onTimeUpdate={setCurrentTime}
+                allowDownload={false}
+              />
+              {isPaywalled ? (
+                <ShareWatermarkOverlay
+                  label={
+                    shareInfo?.status === "ok"
+                      ? `share/${token.slice(0, 8)}`
+                      : "PREVIEW"
+                  }
+                  secondary={isPreviewMode ? "PREVIEW — DO NOT REDISTRIBUTE" : undefined}
+                  active={isPreviewMode}
+                />
+              ) : null}
+            </>
           ) : (
             <div className="relative aspect-video overflow-hidden rounded-xl border border-zinc-800/80 bg-black shadow-[0_10px_40px_rgba(0,0,0,0.45)]">
               {(playbackSession?.posterUrl || video.thumbnailUrl?.startsWith("http")) ? (
@@ -409,7 +630,7 @@ export default function SharePage() {
                     <div className="text-sm font-bold text-[#1a1a1a]">{comment.userName}</div>
                     <button
                       type="button"
-                      className="font-mono text-xs text-[#2d5a2d] hover:text-[#1a1a1a]"
+                      className="font-mono text-xs text-[#FF6600] hover:text-[#1a1a1a]"
                       onClick={() => playerRef.current?.seekTo(comment.timestampSeconds, { play: true })}
                     >
                       {formatTimestamp(comment.timestampSeconds)}
@@ -426,7 +647,7 @@ export default function SharePage() {
                             <span className="font-bold text-[#1a1a1a]">{reply.userName}</span>
                             <button
                               type="button"
-                              className="font-mono text-xs text-[#2d5a2d] hover:text-[#1a1a1a]"
+                              className="font-mono text-xs text-[#FF6600] hover:text-[#1a1a1a]"
                               onClick={() => playerRef.current?.seekTo(reply.timestampSeconds, { play: true })}
                             >
                               {formatTimestamp(reply.timestampSeconds)}
@@ -447,8 +668,8 @@ export default function SharePage() {
       <footer className="border-t-2 border-[#1a1a1a] px-6 py-4 mt-8">
         <div className="max-w-6xl mx-auto text-center text-sm text-[#888]">
           Shared via{" "}
-          <Link to="/" preload="intent" className="text-[#1a1a1a] hover:text-[#2d5a2d] font-bold">
-            lawn
+          <Link to="/" preload="intent" className="text-[#1a1a1a] hover:text-[#FF6600] font-bold">
+            snip
           </Link>
         </div>
       </footer>

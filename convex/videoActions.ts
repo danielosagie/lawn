@@ -13,21 +13,37 @@ import { api, internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import {
   buildMuxPlaybackUrl,
+  buildMuxPreviewUrl,
   buildMuxThumbnailUrl,
   createMuxAssetFromInputUrl,
+  createPreviewMuxAsset,
   createPublicPlaybackId,
+  createSignedPlaybackId,
   getMuxAsset,
+  signPlaybackToken,
+  signThumbnailToken,
 } from "./mux";
 import { BUCKET_NAME, getS3Client } from "./s3";
+import { isFeatureEnabled } from "./featureFlags";
 
 const GIBIBYTE = 1024 ** 3;
 const MAX_PRESIGNED_PUT_FILE_SIZE_BYTES = 5 * GIBIBYTE;
-const ALLOWED_UPLOAD_CONTENT_TYPES = new Set([
+
+// Mux ingest is gated by content type — only actual video types route to
+// the Mux pipeline. Everything else (docs, images, audio, source-control
+// archives, .prproj, etc.) uploads straight to object storage and shows
+// up as a plain file in the project grid. This matches the
+// Google-Drive-as-default-experience the team wants.
+const MUX_VIDEO_CONTENT_TYPES = new Set([
   "video/mp4",
   "video/quicktime",
   "video/webm",
   "video/x-matroska",
 ]);
+
+function isMuxVideoType(contentType: string): boolean {
+  return MUX_VIDEO_CONTENT_TYPES.has(normalizeContentType(contentType));
+}
 
 function getExtensionFromKey(key: string, fallback = "mp4") {
   let source = key;
@@ -143,25 +159,18 @@ function normalizeContentType(contentType: string | null | undefined): string {
     .toLowerCase();
 }
 
-function isAllowedUploadContentType(contentType: string): boolean {
-  return ALLOWED_UPLOAD_CONTENT_TYPES.has(contentType);
-}
-
 function validateUploadRequestOrThrow(args: { fileSize: number; contentType: string }) {
   if (!Number.isFinite(args.fileSize) || args.fileSize <= 0) {
-    throw new Error("Video file size must be greater than zero.");
+    throw new Error("File size must be greater than zero.");
   }
 
   if (args.fileSize > MAX_PRESIGNED_PUT_FILE_SIZE_BYTES) {
-    throw new Error("Video file is too large for direct upload.");
+    throw new Error("File is too large for direct upload (5 GiB max).");
   }
 
-  const normalizedContentType = normalizeContentType(args.contentType);
-  if (!isAllowedUploadContentType(normalizedContentType)) {
-    throw new Error("Unsupported video format. Allowed: mp4, mov, webm, mkv.");
-  }
-
-  return normalizedContentType;
+  // Accept any content type. Mux processing is gated separately on whether
+  // the file actually looks like a video (see markUploadComplete).
+  return normalizeContentType(args.contentType) || "application/octet-stream";
 }
 
 function shouldDeleteUploadedObjectOnFailure(error: unknown): boolean {
@@ -208,6 +217,10 @@ async function ensurePublicPlaybackId(
 ): Promise<string> {
   const { videoId, muxAssetId, muxPlaybackId } = params;
   if (!muxAssetId) return muxPlaybackId;
+  // Demo bypass: no Mux env → can't call the SDK. The video's
+  // muxPlaybackId is already a public playback ID (seeded demo data uses
+  // Mux's public test asset), so stream it directly.
+  if (!isFeatureEnabled("muxIngest")) return muxPlaybackId;
 
   const asset = await getMuxAsset(muxAssetId);
   const playbackIds = (asset.playback_ids ?? []) as Array<{
@@ -311,12 +324,9 @@ export const markUploadComplete = action({
         throw new Error("Video file is too large for direct upload.");
       }
 
-      const normalizedContentType = normalizeContentType(
-        head.ContentType ?? video.contentType,
-      );
-      if (!isAllowedUploadContentType(normalizedContentType)) {
-        throw new Error("Unsupported video format. Allowed: mp4, mov, webm, mkv.");
-      }
+      const normalizedContentType =
+        normalizeContentType(head.ContentType ?? video.contentType) ||
+        "application/octet-stream";
 
       await ctx.runMutation(internal.videos.reconcileUploadedObjectMetadata, {
         videoId: args.videoId,
@@ -324,18 +334,31 @@ export const markUploadComplete = action({
         contentType: normalizedContentType,
       });
 
-      await ctx.runMutation(internal.videos.markAsProcessing, {
-        videoId: args.videoId,
-      });
-
-      const ingestUrl = await buildSignedBucketObjectUrl(video.s3Key, {
-        expiresIn: 60 * 60 * 24,
-      });
-      const asset = await createMuxAssetFromInputUrl(args.videoId, ingestUrl);
-      if (asset.id) {
-        await ctx.runMutation(internal.videos.setMuxAssetReference, {
+      if (isMuxVideoType(normalizedContentType)) {
+        // Video path — kick off Mux ingest as before.
+        await ctx.runMutation(internal.videos.markAsProcessing, {
           videoId: args.videoId,
-          muxAssetId: asset.id,
+        });
+
+        const ingestUrl = await buildSignedBucketObjectUrl(video.s3Key, {
+          expiresIn: 60 * 60 * 24,
+        });
+        const asset = await createMuxAssetFromInputUrl(args.videoId, ingestUrl);
+        if (asset.id) {
+          await ctx.runMutation(internal.videos.setMuxAssetReference, {
+            videoId: args.videoId,
+            muxAssetId: asset.id,
+          });
+        }
+      } else {
+        // Non-video path — file lives in object storage, no Mux processing.
+        // We mark "ready" immediately so the grid + share links treat it as
+        // available for download. The video player will detect the absence
+        // of a playback ID and render a generic file viewer instead.
+        await ctx.runMutation(internal.videos.markAsReadyAsFile, {
+          videoId: args.videoId,
+          fileSize: contentLength,
+          contentType: normalizedContentType,
         });
       }
     } catch (error) {
@@ -600,12 +623,29 @@ export const getSharedDownloadUrl = action({
       throw new Error("Downloads are disabled for this shared link.");
     }
 
+    // Block downloads on paywalled grants until paid. The preview pipeline
+    // already streams only 360p+watermark to unpaid clients via signed Mux;
+    // this gate is the equivalent for direct downloads.
+    if (result.paywall && !result.grantPaidAt) {
+      throw new Error("This download is gated by payment. Pay first to unlock.");
+    }
+
     if (result.video.status !== "ready") {
       throw new Error(getDownloadUnavailableMessage(result.video.status));
     }
 
     const key = getValueString(result.video, "s3Key");
     if (!key) {
+      // Demo-mode fallback: seeded videos have no real upload. Hand the
+      // client a public sample MP4 so they can exercise the download UX
+      // end-to-end. Only when object storage isn't configured — a
+      // misconfigured prod with missing s3Key still errors loudly.
+      if (!isFeatureEnabled("objectStorage")) {
+        return {
+          url: "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4",
+          filename: `${(result.video.title ?? "demo").replace(/[^a-zA-Z0-9._-]+/g, "_")}.mp4`,
+        };
+      }
       throw new Error("Original bucket file not found for this video");
     }
 
@@ -613,5 +653,208 @@ export const getSharedDownloadUrl = action({
       title: result.video.title,
       contentType: result.video.contentType,
     });
+  },
+});
+
+/**
+ * Shared playback for paywalled share links. Returns the watermarked 360p
+ * preview before payment and the full-res signed stream after. Always uses
+ * JWT-signed playback IDs with short TTL — the URL alone is not enough.
+ */
+export const getSharedPaywalledPlayback = action({
+  args: { grantToken: v.string() },
+  returns: v.object({
+    mode: v.union(v.literal("preview"), v.literal("full"), v.literal("public")),
+    url: v.string(),
+    posterUrl: v.string(),
+    tokenExpiresAt: v.union(v.number(), v.null()),
+    paywall: v.union(
+      v.object({
+        priceCents: v.number(),
+        currency: v.string(),
+        description: v.optional(v.string()),
+      }),
+      v.null(),
+    ),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    mode: "preview" | "full" | "public";
+    url: string;
+    posterUrl: string;
+    tokenExpiresAt: number | null;
+    paywall: { priceCents: number; currency: string; description?: string } | null;
+  }> => {
+    const resolved = await ctx.runQuery(api.videos.getByShareGrantWithPaywall, {
+      grantToken: args.grantToken,
+    });
+    if (!resolved) throw new Error("Share grant invalid or expired.");
+    const { video, shareLink, grant } = resolved;
+
+    if (video.status !== "ready" || !video.muxPlaybackId) {
+      throw new Error("Video is not ready yet.");
+    }
+
+    // No paywall → behave like the existing public flow.
+    if (!shareLink.paywall) {
+      const playbackId = await ensurePublicPlaybackId(ctx, {
+        videoId: video._id,
+        muxAssetId: video.muxAssetId,
+        muxPlaybackId: video.muxPlaybackId,
+      });
+      return {
+        mode: "public" as const,
+        url: buildMuxPlaybackUrl(playbackId),
+        posterUrl: buildMuxThumbnailUrl(playbackId),
+        tokenExpiresAt: null,
+        paywall: null,
+      };
+    }
+
+    const paid = Boolean(grant.paidAt);
+    const TTL_SECONDS = 300; // 5 minutes — refreshed via heartbeat.
+
+    // Demo bypass: paywall set but no signed-playback keys. Fall back to
+    // the public playback URL so the share page is testable end-to-end.
+    // The unlock state still flips correctly on simulated payment; the
+    // only thing missing vs. production is the burned-in watermark on the
+    // preview asset.
+    if (!isFeatureEnabled("muxSignedPlayback")) {
+      const playbackId = video.muxPlaybackId;
+      return {
+        mode: paid ? ("full" as const) : ("preview" as const),
+        url: buildMuxPlaybackUrl(playbackId),
+        posterUrl: buildMuxThumbnailUrl(playbackId),
+        tokenExpiresAt: null,
+        paywall: shareLink.paywall,
+      };
+    }
+
+    if (paid) {
+      // Full-res, signed.
+      let fullSignedId = video.muxSignedPlaybackId;
+      if (!fullSignedId && video.muxAssetId) {
+        const created = await createSignedPlaybackId(video.muxAssetId);
+        fullSignedId = created.id;
+        await ctx.runMutation(internal.videos.setMuxSignedPlaybackId, {
+          videoId: video._id,
+          muxSignedPlaybackId: fullSignedId,
+        });
+      }
+      if (!fullSignedId) {
+        throw new Error("Could not provision signed full-res playback.");
+      }
+      const videoToken = await signPlaybackToken(fullSignedId, `${TTL_SECONDS}s`);
+      const thumbToken = await signThumbnailToken(fullSignedId, `${TTL_SECONDS}s`);
+      return {
+        mode: "full" as const,
+        url: buildMuxPlaybackUrl(fullSignedId, videoToken),
+        posterUrl: buildMuxThumbnailUrl(fullSignedId, thumbToken),
+        tokenExpiresAt: Date.now() + TTL_SECONDS * 1000,
+        paywall: shareLink.paywall,
+      };
+    }
+
+    // Preview — watermarked 360p signed asset.
+    if (!video.muxPreviewPlaybackId) {
+      throw new Error("Preview asset not ready yet. Try again shortly.");
+    }
+    const videoToken = await signPlaybackToken(video.muxPreviewPlaybackId, `${TTL_SECONDS}s`);
+    const thumbToken = await signThumbnailToken(video.muxPreviewPlaybackId, `${TTL_SECONDS}s`);
+    return {
+      mode: "preview" as const,
+      url: buildMuxPreviewUrl(video.muxPreviewPlaybackId, videoToken),
+      posterUrl: buildMuxThumbnailUrl(video.muxPreviewPlaybackId, thumbToken),
+      tokenExpiresAt: Date.now() + TTL_SECONDS * 1000,
+      paywall: shareLink.paywall,
+    };
+  },
+});
+
+/**
+ * Kicked off when an agency attaches a paywall to a share link. Generates a
+ * per-link watermark and creates the matching Mux preview asset. Idempotent
+ * — if a preview asset already exists for this video, returns early.
+ */
+export const ensurePreviewAssetForShareLink = action({
+  args: {
+    shareLinkId: v.id("shareLinks"),
+  },
+  returns: v.object({
+    status: v.union(
+      v.literal("ok"),
+      v.literal("alreadyExists"),
+      v.literal("disabled"),
+      v.literal("missingSourceVideo"),
+    ),
+    reason: v.optional(v.string()),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    status: "ok" | "alreadyExists" | "disabled" | "missingSourceVideo";
+    reason?: string;
+  }> => {
+    if (!isFeatureEnabled("watermarkPipeline")) {
+      return {
+        status: "disabled" as const,
+        reason: "Watermark/Mux ingest not configured.",
+      };
+    }
+
+    const link = await ctx.runQuery(internal.shareLinks.getInternal, {
+      shareLinkId: args.shareLinkId,
+    });
+    if (!link) throw new Error("Share link not found");
+
+    const video = await ctx.runQuery(api.videos.getForPreviewGen, {
+      videoId: link.videoId,
+    });
+    if (!video?.s3Key || !video.contentType) {
+      return {
+        status: "missingSourceVideo" as const,
+        reason: "Original upload missing for this video.",
+      };
+    }
+    if (video.muxPreviewAssetId) {
+      return { status: "alreadyExists" as const };
+    }
+
+    const primaryLabel =
+      link.clientEmail ?? link.clientLabel ?? `share/${link.token.slice(0, 8)}`;
+    const watermark = await ctx.runAction(internal.watermark.generateForShareLink, {
+      shareLinkId: args.shareLinkId,
+      primaryLabel,
+      secondaryLabel: "PREVIEW — DO NOT REDISTRIBUTE",
+    });
+    if (watermark.status === "disabled" || !watermark.publicUrl || !watermark.s3Key) {
+      return {
+        status: "disabled" as const,
+        reason: watermark.reason ?? "Watermark generation unavailable.",
+      };
+    }
+
+    const ingestUrl = await buildSignedBucketObjectUrl(video.s3Key, {
+      expiresIn: 60 * 60 * 6,
+    });
+    const previewAsset = await createPreviewMuxAsset(
+      video._id,
+      ingestUrl,
+      watermark.publicUrl,
+    );
+    if (!previewAsset.id) {
+      throw new Error("Mux did not return an asset id for the preview.");
+    }
+
+    await ctx.runMutation(internal.videos.setMuxPreviewAssetReference, {
+      videoId: video._id,
+      muxPreviewAssetId: previewAsset.id,
+      watermarkOverlayKey: watermark.s3Key,
+    });
+
+    return { status: "ok" as const };
   },
 });

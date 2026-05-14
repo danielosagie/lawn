@@ -9,6 +9,7 @@ import {
 export function getProjectEssentialSpecs(params: {
   teamSlug: string;
   projectId: Id<"projects">;
+  folderId?: Id<"folders"> | null;
 }) {
   return [
     makeRouteQuerySpec(api.workspace.resolveContext, {
@@ -20,6 +21,11 @@ export function getProjectEssentialSpecs(params: {
     }),
     makeRouteQuerySpec(api.videos.list, {
       projectId: params.projectId,
+      folderId: params.folderId ?? null,
+    }),
+    makeRouteQuerySpec(api.folders.list, {
+      projectId: params.projectId,
+      parentFolderId: params.folderId ?? undefined,
     }),
   ];
 }
@@ -27,6 +33,7 @@ export function getProjectEssentialSpecs(params: {
 export function useProjectData(params: {
   teamSlug: string;
   projectId: Id<"projects">;
+  folderId?: Id<"folders"> | null;
 }) {
   const context = useQuery(api.workspace.resolveContext, {
     teamSlug: params.teamSlug,
@@ -40,7 +47,18 @@ export function useProjectData(params: {
   );
   const videos = useQuery(
     api.videos.list,
-    resolvedProjectId ? { projectId: resolvedProjectId } : "skip",
+    resolvedProjectId
+      ? { projectId: resolvedProjectId, folderId: params.folderId ?? null }
+      : "skip",
+  );
+  const folders = useQuery(
+    api.folders.list,
+    resolvedProjectId
+      ? {
+          projectId: resolvedProjectId,
+          parentFolderId: params.folderId ?? undefined,
+        }
+      : "skip",
   );
 
   return {
@@ -49,6 +67,7 @@ export function useProjectData(params: {
     resolvedTeamSlug,
     project,
     videos,
+    folders,
   };
 }
 
@@ -57,6 +76,7 @@ export async function prewarmProject(
   params: {
     teamSlug: string;
     projectId: Id<"projects">;
+    folderId?: Id<"folders"> | null;
   },
 ) {
   prewarmSpecs(convex, getProjectEssentialSpecs(params));

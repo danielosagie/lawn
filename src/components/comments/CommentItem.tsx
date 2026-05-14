@@ -71,7 +71,7 @@ export function CommentItem({
         "transition-all relative group",
         isReply ? "py-2" : "p-4",
         isHighlighted
-          ? "bg-[#2d5a2d]/10"
+          ? "bg-[#FF6600]/10"
           : "hover:bg-[#1a1a1a]/5",
         comment.resolved && "opacity-50"
       )}
@@ -91,7 +91,7 @@ export function CommentItem({
               </span>
               <button
                 onClick={() => onTimestampClick(comment.timestampSeconds)}
-                className="text-xs text-[#2d5a2d] hover:text-[#1a1a1a] font-mono font-bold shrink-0"
+                className="text-xs text-[#FF6600] hover:text-[#1a1a1a] font-mono font-bold shrink-0"
               >
                 {formatTimestamp(comment.timestampSeconds)}
               </button>

@@ -155,7 +155,7 @@ export default function WatchPage() {
           </CardHeader>
           <CardContent>
             <Link to="/" preload="intent" className="block">
-              <Button variant="outline" className="w-full">Go to lawn</Button>
+              <Button variant="outline" className="w-full">Go to snip</Button>
             </Link>
           </CardContent>
         </Card>
@@ -175,7 +175,7 @@ export default function WatchPage() {
             to="/"
             className="text-[#888] hover:text-[#1a1a1a] text-sm flex items-center gap-2 font-bold"
           >
-            lawn
+            snip
           </Link>
           <div className="h-4 w-[2px] bg-[#1a1a1a]/20" />
           <h1 className="text-base font-black truncate max-w-[150px] sm:max-w-[300px]">{video.title}</h1>
@@ -275,7 +275,7 @@ export default function WatchPage() {
                       <div className="text-sm font-bold text-[#1a1a1a]">{comment.userName}</div>
                       <button
                         type="button"
-                        className="font-mono text-xs text-[#2d5a2d] hover:text-[#1a1a1a]"
+                        className="font-mono text-xs text-[#FF6600] hover:text-[#1a1a1a]"
                         onClick={() => playerRef.current?.seekTo(comment.timestampSeconds, { play: true })}
                       >
                         {formatTimestamp(comment.timestampSeconds)}
@@ -292,7 +292,7 @@ export default function WatchPage() {
                               <span className="font-bold text-[#1a1a1a]">{reply.userName}</span>
                               <button
                                 type="button"
-                                className="font-mono text-xs text-[#2d5a2d] hover:text-[#1a1a1a]"
+                                className="font-mono text-xs text-[#FF6600] hover:text-[#1a1a1a]"
                                 onClick={() => playerRef.current?.seekTo(reply.timestampSeconds, { play: true })}
                               >
                                 {formatTimestamp(reply.timestampSeconds)}
@@ -378,7 +378,7 @@ export default function WatchPage() {
                       <div className="text-sm font-bold text-[#1a1a1a]">{comment.userName}</div>
                       <button
                         type="button"
-                        className="font-mono text-xs text-[#2d5a2d] hover:text-[#1a1a1a]"
+                        className="font-mono text-xs text-[#FF6600] hover:text-[#1a1a1a]"
                         onClick={() => {
                           playerRef.current?.seekTo(comment.timestampSeconds, { play: true });
                           setMobileCommentsOpen(false);
@@ -398,7 +398,7 @@ export default function WatchPage() {
                               <span className="font-bold text-[#1a1a1a]">{reply.userName}</span>
                               <button
                                 type="button"
-                                className="font-mono text-xs text-[#2d5a2d] hover:text-[#1a1a1a]"
+                                className="font-mono text-xs text-[#FF6600] hover:text-[#1a1a1a]"
                                 onClick={() => {
                                   playerRef.current?.seekTo(reply.timestampSeconds, { play: true });
                                   setMobileCommentsOpen(false);

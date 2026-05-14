@@ -1,25 +1,32 @@
 
 import { useAction, useConvex, useMutation, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
-import { Link, useLocation, useNavigate } from "@tanstack/react-router";
-import { useState, useCallback, useEffect, useRef, type ReactNode } from "react";
+import { useLocation, useNavigate } from "@tanstack/react-router";
+import { useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { DropZone } from "@/components/upload/DropZone";
-import { UploadProgress } from "@/components/upload/UploadProgress";
 import { UploadButton } from "@/components/upload/UploadButton";
 import { formatDuration, formatRelativeTime } from "@/lib/utils";
 import { triggerDownload } from "@/lib/download";
 import {
-  ArrowLeft,
   Play,
   MoreVertical,
   Trash2,
   Link as LinkIcon,
-  Grid3X3,
-  LayoutList,
   Download,
   MessageSquare,
   Eye,
 } from "lucide-react";
+import { FileTile, FileListRow } from "@/components/files/FileTile";
+import { VideoKanban } from "@/components/videos/VideoKanban";
+import { VersionDropdown } from "@/components/projects/VersionDropdown";
+import {
+  ProjectToolbar,
+  type ProjectViewMode,
+  type ProjectSortMode,
+} from "@/components/projects/ProjectToolbar";
+import { ProjectAddButton } from "@/components/projects/ProjectAddButton";
+import { FolderRow } from "@/components/folders/FolderRow";
+import { ContractTile } from "@/components/contracts/ContractTile";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,7 +48,7 @@ import { prewarmVideo } from "./-video.data";
 import { useDashboardUploadContext } from "@/lib/dashboardUploadContext";
 import { DashboardHeader } from "@/components/DashboardHeader";
 
-type ViewMode = "grid" | "list";
+type ViewMode = ProjectViewMode;
 type ShareToastState = {
   tone: "success" | "error";
   message: string;
@@ -82,6 +89,7 @@ type VideoIntentTargetProps = {
   projectId: Id<"projects">;
   videoId: Id<"videos">;
   muxPlaybackId?: string;
+  draggable?: boolean;
   onOpen: () => void;
   children: ReactNode;
 };
@@ -92,6 +100,7 @@ function VideoIntentTarget({
   projectId,
   videoId,
   muxPlaybackId,
+  draggable,
   onOpen,
   children,
 }: VideoIntentTargetProps) {
@@ -112,6 +121,12 @@ function VideoIntentTarget({
     <div
       className={className}
       onClick={onOpen}
+      draggable={draggable}
+      onDragStart={(e) => {
+        if (!draggable) return;
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("application/x-snip-video", videoId);
+      }}
       {...prewarmIntentHandlers}
     >
       {children}
@@ -122,27 +137,40 @@ function VideoIntentTarget({
 export default function ProjectPage({
   teamSlug,
   projectId,
+  folderId,
 }: {
   teamSlug: string;
   projectId: Id<"projects">;
+  folderId?: Id<"folders"> | null;
 }) {
   const navigate = useNavigate({});
   const pathname = useLocation().pathname;
   const convex = useConvex();
 
-  const { context, resolvedProjectId, resolvedTeamSlug, project, videos } =
-    useProjectData({ teamSlug, projectId });
+  const currentFolderId = folderId ?? null;
+
+  const {
+    context,
+    resolvedProjectId,
+    resolvedTeamSlug,
+    project,
+    videos,
+    folders,
+  } = useProjectData({ teamSlug, projectId, folderId: currentFolderId });
   const projectPresenceCounts = useQuery(
     api.videoPresence.listProjectOnlineCounts,
     resolvedProjectId ? { projectId: resolvedProjectId } : "skip",
   );
-  const { requestUpload, uploads } =
-    useDashboardUploadContext();
+  const { requestUpload } = useDashboardUploadContext();
   const deleteVideo = useMutation(api.videos.remove);
   const updateVideoWorkflowStatus = useMutation(api.videos.updateWorkflowStatus);
+  const moveVideoToFolder = useMutation(api.folders.moveVideoToFolder);
+  const moveFolder = useMutation(api.folders.moveFolder);
   const getDownloadUrl = useAction(api.videoActions.getDownloadUrl);
 
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [sort, setSort] = useState<ProjectSortMode>("newest");
+  const [search, setSearch] = useState("");
   const [shareToast, setShareToast] = useState<ShareToastState | null>(null);
   const shareToastTimeoutRef = useRef<number | null>(null);
 
@@ -171,15 +199,35 @@ export default function ProjectPage({
     context === undefined ||
     project === undefined ||
     videos === undefined ||
+    folders === undefined ||
     shouldCanonicalize;
 
   const handleFilesSelected = useCallback(
     (files: File[]) => {
       if (!resolvedProjectId) return;
-      requestUpload(files, resolvedProjectId);
+      // When the user is inside a folder, uploads land directly in it.
+      // At the root they're created with no folderId as before.
+      requestUpload(
+        files,
+        resolvedProjectId,
+        currentFolderId ?? undefined,
+      );
     },
-    [requestUpload, resolvedProjectId],
+    [requestUpload, resolvedProjectId, currentFolderId],
   );
+
+  // Hidden <input type=file> opened by the toolbar's "Add files" action.
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const openFilePicker = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+  const handleHiddenInputChange = (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const picked = e.target.files ? Array.from(e.target.files) : [];
+    if (picked.length > 0) handleFilesSelected(picked);
+    e.target.value = "";
+  };
 
   const handleDeleteVideo = async (videoId: Id<"videos">) => {
     if (!confirm("Are you sure you want to delete this video?")) return;
@@ -202,6 +250,34 @@ export default function ProjectPage({
       }
     },
     [getDownloadUrl],
+  );
+
+  const handleMoveVideo = useCallback(
+    async (videoId: Id<"videos">, folderId: Id<"folders"> | null) => {
+      try {
+        await moveVideoToFolder({
+          videoId,
+          folderId: folderId ?? undefined,
+        });
+      } catch (e) {
+        alert(e instanceof Error ? e.message : "Move failed.");
+      }
+    },
+    [moveVideoToFolder],
+  );
+
+  const handleMoveFolder = useCallback(
+    async (folderId: Id<"folders">, parentFolderId: Id<"folders"> | null) => {
+      try {
+        await moveFolder({
+          folderId,
+          parentFolderId: parentFolderId ?? undefined,
+        });
+      } catch (e) {
+        alert(e instanceof Error ? e.message : "Move failed.");
+      }
+    },
+    [moveFolder],
   );
 
   const handleUpdateWorkflowStatus = useCallback(
@@ -262,6 +338,56 @@ export default function ProjectPage({
     [projectId, resolvedTeamSlug, showShareToast],
   );
 
+  // Apply search + sort client-side. The query already scopes by
+  // folderId, so we're only filtering by title and reordering.
+  // NOTE: these useMemo calls must stay above the early-return guards
+  // below — React requires the same hook order on every render.
+  const filteredVideos = useMemo(() => {
+    if (!videos) return videos;
+    const q = search.trim().toLowerCase();
+    const filtered = q
+      ? videos.filter((v) => v.title.toLowerCase().includes(q))
+      : videos.slice();
+    filtered.sort((a, b) => {
+      switch (sort) {
+        case "name":
+          return a.title.localeCompare(b.title);
+        case "oldest":
+          return a._creationTime - b._creationTime;
+        case "type":
+          return (a.contentType ?? "").localeCompare(b.contentType ?? "");
+        case "size":
+          return (b.fileSize ?? 0) - (a.fileSize ?? 0);
+        case "newest":
+        default:
+          return b._creationTime - a._creationTime;
+      }
+    });
+    return filtered;
+  }, [videos, search, sort]);
+
+  const filteredFolders = useMemo(() => {
+    if (!folders) return folders;
+    const q = search.trim().toLowerCase();
+    const filtered = q
+      ? folders.filter((f) => f.name.toLowerCase().includes(q))
+      : folders.slice();
+    filtered.sort((a, b) => {
+      switch (sort) {
+        case "oldest":
+          return a._creationTime - b._creationTime;
+        case "newest":
+          return b._creationTime - a._creationTime;
+        case "name":
+        case "type":
+        case "size":
+        default:
+          return a.name.localeCompare(b.name);
+      }
+    });
+    return filtered;
+  }, [folders, search, sort]);
+
   // Not found state
   if (context === null || project === null) {
     return (
@@ -271,7 +397,27 @@ export default function ProjectPage({
     );
   }
 
+  // Loading state — Convex queries return `undefined` until the first
+  // result arrives. The body below assumes `project._id` exists, so we
+  // bail out cleanly until it does.
+  if (!project) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-[#888]">Loading project…</div>
+      </div>
+    );
+  }
+
   const canUpload = project?.role !== "viewer";
+
+  const contractState: "none" | "draft" | "awaiting" | "signed" =
+    project?.contract?.signedAt
+      ? "signed"
+      : project?.contract?.sentForSignatureAt
+        ? "awaiting"
+        : project?.contract
+          ? "draft"
+          : "none";
 
   return (
     <div className="h-full flex flex-col">
@@ -288,40 +434,58 @@ export default function ProjectPage({
           "flex items-center gap-2 transition-opacity duration-300 flex-shrink-0",
           isLoadingData ? "opacity-0" : "opacity-100"
         )}>
-          {/* View toggle */}
-          <div className="flex items-center border-2 border-[#1a1a1a] p-0.5">
-            <button
-              onClick={() => setViewMode("grid")}
-              className={cn(
-                "p-1.5 transition-colors",
-                viewMode === "grid"
-                  ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                  : "text-[#888] hover:text-[#1a1a1a]",
-              )}
-            >
-              <Grid3X3 className="h-4 w-4" />
-            </button>
-            <button
-              onClick={() => setViewMode("list")}
-              className={cn(
-                "p-1.5 transition-colors",
-                viewMode === "list"
-                  ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                  : "text-[#888] hover:text-[#1a1a1a]",
-              )}
-            >
-              <LayoutList className="h-4 w-4" />
-            </button>
-          </div>
-          {canUpload && (
-            <UploadButton onFilesSelected={handleFilesSelected} />
-          )}
+          {resolvedProjectId ? (
+            <VersionDropdown
+              projectId={resolvedProjectId}
+              canEdit={canUpload}
+            />
+          ) : null}
+          {resolvedProjectId && canUpload ? (
+            <ProjectAddButton
+              projectId={resolvedProjectId}
+              currentFolderId={currentFolderId}
+              onAddFiles={openFilePicker}
+              contractHref={`/dashboard/${resolvedTeamSlug}/${resolvedProjectId}/contract`}
+              contractState={contractState}
+            />
+          ) : null}
         </div>
       </DashboardHeader>
 
+      {/* Hidden file input opened by the Add \u2192 Add files action. */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        onChange={handleHiddenInputChange}
+        className="hidden"
+      />
+
+      {resolvedProjectId ? (
+        <ProjectToolbar
+          teamSlug={resolvedTeamSlug}
+          projectId={resolvedProjectId}
+          currentFolderId={currentFolderId}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+          sort={sort}
+          onSortChange={setSort}
+          search={search}
+          onSearchChange={setSearch}
+          onDropVideoOnBreadcrumb={(videoId, targetFolderId) =>
+            void handleMoveVideo(videoId, targetFolderId)
+          }
+          onDropFolderOnBreadcrumb={(folderId, targetFolderId) =>
+            void handleMoveFolder(folderId, targetFolderId)
+          }
+        />
+      ) : null}
+
       {/* Content */}
       <div className="flex-1 overflow-auto">
-        {!isLoadingData && videos.length === 0 ? (
+        {!isLoadingData &&
+        videos.length === 0 &&
+        (folders?.length ?? 0) === 0 ? (
           <div className="h-full flex items-center justify-center p-6 animate-in fade-in duration-300">
             <DropZone
               onFilesSelected={handleFilesSelected}
@@ -329,14 +493,99 @@ export default function ProjectPage({
               className="max-w-xl w-full"
             />
           </div>
+        ) : viewMode === "kanban" ? (
+          <div
+            className={cn(
+              "p-6 transition-opacity duration-300",
+              isLoadingData ? "opacity-0" : "opacity-100",
+            )}
+          >
+            <VideoKanban
+              teamSlug={resolvedTeamSlug}
+              projectId={project._id}
+              videos={(filteredVideos ?? []).map((v) => ({
+                _id: v._id,
+                _creationTime: v._creationTime,
+                title: v.title,
+                description: v.description,
+                uploaderName: v.uploaderName,
+                duration: v.duration,
+                thumbnailUrl: v.thumbnailUrl,
+                status: v.status,
+                workflowStatus: v.workflowStatus,
+                commentCount: v.commentCount,
+              }))}
+              canEdit={canUpload}
+            />
+          </div>
         ) : viewMode === "grid" ? (
           /* Grid View - Responsive tiles */
           <div className={cn(
-            "p-6 transition-opacity duration-300",
+            "transition-opacity duration-300",
             isLoadingData ? "opacity-0" : "opacity-100"
           )}>
-            <div className="grid gap-5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-              {videos?.map((video) => {
+            <FolderRow
+              teamSlug={resolvedTeamSlug}
+              projectId={project._id}
+              folders={filteredFolders ?? []}
+              canEdit={canUpload}
+              onDropVideo={(videoId, folderId) =>
+                void handleMoveVideo(videoId, folderId)
+              }
+              onDropFolder={(droppedId, targetId) =>
+                void handleMoveFolder(droppedId, targetId)
+              }
+            />
+            <div className="px-6 pt-4 pb-6">
+              {(filteredFolders?.length ?? 0) > 0 ? (
+                <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-2">
+                  Files
+                </div>
+              ) : null}
+              <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
+              {/* Contract pinned to the front of the grid when at
+                  project root. Contracts live one-per-project today
+                  (not in a folder), so we only show the tile when
+                  the user isn't deep inside a folder. */}
+              {currentFolderId === null ? (
+                <ContractTile
+                  teamSlug={resolvedTeamSlug}
+                  projectId={project._id}
+                  projectName={project.name}
+                  contract={project.contract ?? null}
+                  canDelete={canUpload}
+                />
+              ) : null}
+              {filteredVideos?.map((video) => {
+                // Non-video assets (PDF, docs, images, source files) take
+                // a separate Drive-style tile — no thumbnail, no
+                // playback, just a big file-type icon and a download
+                // affordance. Detection: a "video" without a Mux playback
+                // ID after processing finished is, by definition, not a
+                // playable video.
+                const isPlayableVideo =
+                  Boolean(video.muxPlaybackId) ||
+                  (video.contentType?.startsWith("video/") ?? false) ||
+                  video.status === "uploading" ||
+                  video.status === "processing";
+                if (!isPlayableVideo) {
+                  return (
+                    <FileTile
+                      key={video._id}
+                      videoId={video._id}
+                      title={video.title}
+                      contentType={video.contentType}
+                      fileSize={video.fileSize}
+                      uploaderName={video.uploaderName}
+                      createdAt={video._creationTime}
+                      status={video.status}
+                      canDelete={canUpload}
+                      draggable={canUpload}
+                      onDelete={() => handleDeleteVideo(video._id)}
+                    />
+                  );
+                }
+
                 const thumbnailSrc = video.thumbnailUrl?.startsWith("http")
                   ? video.thumbnailUrl
                   : undefined;
@@ -352,6 +601,7 @@ export default function ProjectPage({
                     projectId={project._id}
                     videoId={video._id}
                     muxPlaybackId={video.muxPlaybackId}
+                    draggable={canUpload}
                     onOpen={() =>
                       navigate({
                         to: videoPath(resolvedTeamSlug, project._id, video._id),
@@ -471,15 +721,52 @@ export default function ProjectPage({
                   </VideoIntentTarget>
                 );
               })}
+              </div>
             </div>
           </div>
         ) : (
           /* List View - Horizontal rows */
           <div className={cn(
-            "divide-y-2 divide-[#1a1a1a] transition-opacity duration-300",
+            "transition-opacity duration-300",
             isLoadingData ? "opacity-0" : "opacity-100"
           )}>
-            {videos?.map((video) => {
+            <FolderRow
+              teamSlug={resolvedTeamSlug}
+              projectId={project._id}
+              folders={filteredFolders ?? []}
+              canEdit={canUpload}
+              onDropVideo={(videoId, folderId) =>
+                void handleMoveVideo(videoId, folderId)
+              }
+              onDropFolder={(droppedId, targetId) =>
+                void handleMoveFolder(droppedId, targetId)
+              }
+            />
+            <div className="divide-y-2 divide-[#1a1a1a]">
+            {filteredVideos?.map((video) => {
+              const isPlayableVideo =
+                Boolean(video.muxPlaybackId) ||
+                (video.contentType?.startsWith("video/") ?? false) ||
+                video.status === "uploading" ||
+                video.status === "processing";
+              if (!isPlayableVideo) {
+                return (
+                  <FileListRow
+                    key={video._id}
+                    videoId={video._id}
+                    title={video.title}
+                    contentType={video.contentType}
+                    fileSize={video.fileSize}
+                    uploaderName={video.uploaderName}
+                    createdAt={video._creationTime}
+                    status={video.status}
+                    canDelete={canUpload}
+                    draggable={canUpload}
+                    onDelete={() => handleDeleteVideo(video._id)}
+                  />
+                );
+              }
+
               const thumbnailSrc = video.thumbnailUrl?.startsWith("http")
                 ? video.thumbnailUrl
                 : undefined;
@@ -495,6 +782,7 @@ export default function ProjectPage({
                   projectId={project._id}
                   videoId={video._id}
                   muxPlaybackId={video.muxPlaybackId}
+                  draggable={canUpload}
                   onOpen={() =>
                     navigate({
                       to: videoPath(resolvedTeamSlug, project._id, video._id),
@@ -620,8 +908,12 @@ export default function ProjectPage({
                 </VideoIntentTarget>
               );
             })}
+            </div>
           </div>
         )}
+        {/* Timeline history used to live here as a panel under the grid.
+            Pulled out so each file owns its own per-file version dropdown
+            in its top bar (Google-Docs style). */}
       </div>
 
       {shareToast ? (

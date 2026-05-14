@@ -49,13 +49,13 @@ export function UploadProgress({
         </div>
         <div className="flex items-center gap-2">
           {status === "complete" && (
-            <CheckCircle className="h-5 w-5 text-[#2d5a2d]" />
+            <CheckCircle className="h-5 w-5 text-[#FF6600]" />
           )}
           {status === "error" && (
             <AlertCircle className="h-5 w-5 text-[#dc2626]" />
           )}
           {status === "processing" && (
-            <Loader2 className="h-5 w-5 text-[#2d5a2d] animate-spin" />
+            <Loader2 className="h-5 w-5 text-[#FF6600] animate-spin" />
           )}
           {(status === "pending" || status === "uploading") && onCancel && (
             <Button

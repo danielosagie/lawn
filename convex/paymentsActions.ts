@@ -1,0 +1,289 @@
+"use node";
+
+import { v } from "convex/values";
+import Stripe from "stripe";
+import { action } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { isFeatureEnabled } from "./featureFlags";
+
+/**
+ * Node-only side of payments. Lives here (and not in payments.ts) because
+ * the Stripe Node SDK isn't allowed in Convex V8 isolates — Convex requires
+ * files with "use node" to only export actions.
+ *
+ * Platform fee: 0% for v1. Configurable via VIDEOINFRA_PLATFORM_FEE_BASIS_POINTS
+ * (e.g. 100 = 1%) if you decide to take a cut later.
+ */
+
+const PLATFORM_FEE_BASIS_POINTS = (() => {
+  const raw = process.env.VIDEOINFRA_PLATFORM_FEE_BASIS_POINTS;
+  if (!raw) return 0;
+  const parsed = parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 5000) return 0;
+  return parsed;
+})();
+
+function getStripe(): Stripe | null {
+  const secret = process.env.STRIPE_SECRET_KEY;
+  if (!secret) return null;
+  return new Stripe(secret);
+}
+
+function computeApplicationFee(amountCents: number): number {
+  if (PLATFORM_FEE_BASIS_POINTS <= 0) return 0;
+  const fee = Math.floor((amountCents * PLATFORM_FEE_BASIS_POINTS) / 10000);
+  return Math.max(0, fee);
+}
+
+export const createCheckoutForGrant = action({
+  args: {
+    grantToken: v.string(),
+    successUrl: v.string(),
+    cancelUrl: v.string(),
+    clientEmail: v.optional(v.string()),
+  },
+  returns: v.object({
+    status: v.union(
+      v.literal("ok"),
+      v.literal("disabled"),
+      v.literal("noPaywall"),
+      v.literal("alreadyPaid"),
+      v.literal("teamNotConnected"),
+      v.literal("invalidGrant"),
+    ),
+    url: v.union(v.string(), v.null()),
+    reason: v.optional(v.string()),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    status:
+      | "ok"
+      | "disabled"
+      | "noPaywall"
+      | "alreadyPaid"
+      | "teamNotConnected"
+      | "invalidGrant";
+    url: string | null;
+    reason?: string;
+  }> => {
+    if (!isFeatureEnabled("stripeConnect")) {
+      return {
+        status: "disabled",
+        url: null,
+        reason: "Stripe is not configured on this deployment.",
+      };
+    }
+    const stripe = getStripe();
+    if (!stripe) {
+      return { status: "disabled", url: null, reason: "Stripe not configured." };
+    }
+
+    const lookup = await ctx.runQuery(internal.payments.lookupGrantForCheckout, {
+      grantToken: args.grantToken,
+    });
+    if (!lookup) {
+      return { status: "invalidGrant", url: null };
+    }
+
+    if (lookup.grant.paidAt) {
+      return { status: "alreadyPaid", url: null };
+    }
+    if (!lookup.shareLink.paywall) {
+      return { status: "noPaywall", url: null };
+    }
+    if (!lookup.team.stripeConnectAccountId) {
+      return {
+        status: "teamNotConnected",
+        url: null,
+        reason: "This team hasn't connected Stripe yet.",
+      };
+    }
+    if (lookup.team.stripeConnectStatus !== "active") {
+      return {
+        status: "teamNotConnected",
+        url: null,
+        reason: "This team's Stripe account isn't ready to accept payments yet.",
+      };
+    }
+
+    const paywall = lookup.shareLink.paywall;
+    const amountCents = paywall.priceCents;
+    const currency = paywall.currency;
+    const productName =
+      paywall.description ?? `Final delivery: ${lookup.video.title}`;
+    const applicationFeeAmount = computeApplicationFee(amountCents);
+
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      line_items: [
+        {
+          price_data: {
+            currency,
+            product_data: { name: productName },
+            unit_amount: amountCents,
+          },
+          quantity: 1,
+        },
+      ],
+      customer_email: args.clientEmail ?? lookup.shareLink.clientEmail,
+      success_url: args.successUrl,
+      cancel_url: args.cancelUrl,
+      payment_intent_data: {
+        ...(applicationFeeAmount > 0
+          ? { application_fee_amount: applicationFeeAmount }
+          : {}),
+        transfer_data: { destination: lookup.team.stripeConnectAccountId },
+        metadata: {
+          grantId: lookup.grant._id,
+          shareLinkId: lookup.shareLink._id,
+          videoId: lookup.video._id,
+          teamId: lookup.team._id,
+        },
+      },
+      metadata: {
+        grantId: lookup.grant._id,
+        shareLinkId: lookup.shareLink._id,
+        videoId: lookup.video._id,
+        teamId: lookup.team._id,
+      },
+    });
+
+    await ctx.runMutation(internal.payments.recordCheckoutCreated, {
+      grantId: lookup.grant._id,
+      shareLinkId: lookup.shareLink._id,
+      teamId: lookup.team._id,
+      videoId: lookup.video._id,
+      clientEmail: args.clientEmail ?? lookup.shareLink.clientEmail,
+      amountCents,
+      currency,
+      stripeCheckoutSessionId: session.id,
+      stripeConnectAccountId: lookup.team.stripeConnectAccountId,
+      applicationFeeAmountCents: applicationFeeAmount,
+    });
+
+    return { status: "ok", url: session.url };
+  },
+});
+
+/**
+ * Canva-style per-video checkout. Doesn't require a share grant — the
+ * client just hits "Download — $X" on the video and we send them straight
+ * to Stripe. clientEmail identifies the buyer (Stripe Checkout collects it
+ * if not provided up-front).
+ */
+export const createCheckoutForVideo = action({
+  args: {
+    videoId: v.id("videos"),
+    clientEmail: v.optional(v.string()),
+    successUrl: v.string(),
+    cancelUrl: v.string(),
+  },
+  returns: v.object({
+    status: v.union(
+      v.literal("ok"),
+      v.literal("disabled"),
+      v.literal("noPaywall"),
+      v.literal("teamNotConnected"),
+      v.literal("videoNotFound"),
+    ),
+    url: v.union(v.string(), v.null()),
+    reason: v.optional(v.string()),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    status:
+      | "ok"
+      | "disabled"
+      | "noPaywall"
+      | "teamNotConnected"
+      | "videoNotFound";
+    url: string | null;
+    reason?: string;
+  }> => {
+    if (!isFeatureEnabled("stripeConnect")) {
+      return {
+        status: "disabled",
+        url: null,
+        reason: "Stripe is not configured on this deployment.",
+      };
+    }
+    const stripe = getStripe();
+    if (!stripe) {
+      return { status: "disabled", url: null, reason: "Stripe not configured." };
+    }
+
+    const lookup = await ctx.runQuery(internal.payments.lookupVideoForCheckout, {
+      videoId: args.videoId,
+    });
+    if (!lookup) return { status: "videoNotFound", url: null };
+    if (!lookup.video.paywall) return { status: "noPaywall", url: null };
+    if (!lookup.team.stripeConnectAccountId) {
+      return {
+        status: "teamNotConnected",
+        url: null,
+        reason: "This team hasn't connected Stripe yet.",
+      };
+    }
+    if (lookup.team.stripeConnectStatus !== "active") {
+      return {
+        status: "teamNotConnected",
+        url: null,
+        reason: "This team's Stripe account isn't ready to accept payments yet.",
+      };
+    }
+
+    const paywall = lookup.video.paywall;
+    const productName =
+      paywall.description ?? `Download: ${lookup.video.title}`;
+    const applicationFeeAmount = computeApplicationFee(paywall.priceCents);
+
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      line_items: [
+        {
+          price_data: {
+            currency: paywall.currency,
+            product_data: { name: productName },
+            unit_amount: paywall.priceCents,
+          },
+          quantity: 1,
+        },
+      ],
+      customer_email: args.clientEmail,
+      success_url: args.successUrl,
+      cancel_url: args.cancelUrl,
+      payment_intent_data: {
+        ...(applicationFeeAmount > 0
+          ? { application_fee_amount: applicationFeeAmount }
+          : {}),
+        transfer_data: { destination: lookup.team.stripeConnectAccountId },
+        metadata: {
+          videoId: lookup.video._id,
+          teamId: lookup.team._id,
+        },
+      },
+      metadata: {
+        videoId: lookup.video._id,
+        teamId: lookup.team._id,
+        kind: "video",
+      },
+    });
+
+    await ctx.runMutation(internal.payments.recordVideoCheckoutCreated, {
+      teamId: lookup.team._id,
+      videoId: lookup.video._id,
+      clientEmail: args.clientEmail,
+      amountCents: paywall.priceCents,
+      currency: paywall.currency,
+      stripeCheckoutSessionId: session.id,
+      stripeConnectAccountId: lookup.team.stripeConnectAccountId,
+      applicationFeeAmountCents: applicationFeeAmount,
+    });
+
+    return { status: "ok", url: session.url };
+  },
+});

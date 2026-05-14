@@ -31,16 +31,16 @@ import { prewarmSettings } from "./-settings.data";
 import { prewarmTeam } from "./-team.data";
 import { useVideoUploadManager } from "./-useVideoUploadManager";
 import { DashboardUploadProvider } from "@/lib/dashboardUploadContext";
+import { DashboardSidebar } from "@/components/DashboardSidebar";
+import { SidebarProvider } from "@/lib/sidebarContext";
 
-const VIDEO_FILE_EXTENSIONS = /\.(mp4|mov|m4v|webm|avi|mkv)$/i;
-
-function isVideoFile(file: File) {
-  return file.type.startsWith("video/") || VIDEO_FILE_EXTENSIONS.test(file.name);
-}
-
-function getVideoFiles(files: FileList | null) {
+function getDroppedFiles(files: FileList | null) {
+  // No file-type filter. The dashboard accepts every file the user
+  // can drag in — videos, source files, PDFs, .docx, images, archives,
+  // anything. The upload manager + FileTile renderer already handle
+  // non-video assets correctly.
   if (!files) return [];
-  return Array.from(files).filter(isVideoFile);
+  return Array.from(files);
 }
 
 function dragEventHasFiles(event: DragEvent) {
@@ -89,12 +89,23 @@ export default function DashboardLayout() {
     : false;
 
   const requestUpload = useCallback(
-    (inputFiles: File[], preferredProjectId?: Id<"projects">) => {
-      const files = inputFiles.filter(isVideoFile);
+    (
+      inputFiles: File[],
+      preferredProjectId?: Id<"projects">,
+      preferredFolderId?: Id<"folders">,
+    ) => {
+      // Accept anything the user dragged in. Non-video assets still
+      // route through the same upload pipeline; the file renderer
+      // picks an icon based on contentType / extension downstream.
+      const files = inputFiles.filter((f) => f.size > 0);
       if (files.length === 0) return;
 
       if (preferredProjectId) {
-        void uploadFilesToProject(preferredProjectId, files);
+        void uploadFilesToProject(
+          preferredProjectId,
+          files,
+          preferredFolderId,
+        );
         return;
       }
 
@@ -102,6 +113,9 @@ export default function DashboardLayout() {
         routeProjectId &&
         (canUploadToCurrentProject || uploadTargets === undefined)
       ) {
+        // Falling back to the route's project — there's no caller-
+        // supplied folder context here (global drag-drop), so the
+        // file lands at project root.
         void uploadFilesToProject(routeProjectId, files);
         return;
       }
@@ -141,8 +155,16 @@ export default function DashboardLayout() {
     }
   }, []);
 
+  // Routes where the global "drop a file to upload" overlay is
+  // disabled. The contract editor handles its own paste/drop via
+  // Tiptap, and the wizard would just swallow the file anyway.
+  // Match on path suffix so any nested route under /contract counts.
+  const isDropDisabledRoute =
+    pathname.endsWith("/contract") || pathname.includes("/contract/");
+
   useEffect(() => {
     const handleDragEnter = (event: DragEvent) => {
+      if (isDropDisabledRoute) return;
       if (!dragEventHasFiles(event)) return;
       event.preventDefault();
       dragDepthRef.current += 1;
@@ -150,12 +172,14 @@ export default function DashboardLayout() {
     };
 
     const handleDragOver = (event: DragEvent) => {
+      if (isDropDisabledRoute) return;
       if (!dragEventHasFiles(event)) return;
       event.preventDefault();
       setIsGlobalDragActive(true);
     };
 
     const handleDragLeave = (event: DragEvent) => {
+      if (isDropDisabledRoute) return;
       if (!dragEventHasFiles(event)) return;
       event.preventDefault();
       dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
@@ -165,12 +189,13 @@ export default function DashboardLayout() {
     };
 
     const handleDrop = (event: DragEvent) => {
+      if (isDropDisabledRoute) return;
       if (!dragEventHasFiles(event)) return;
       event.preventDefault();
       dragDepthRef.current = 0;
       setIsGlobalDragActive(false);
 
-      const files = getVideoFiles(event.dataTransfer?.files ?? null);
+      const files = getDroppedFiles(event.dataTransfer?.files ?? null);
       if (files.length === 0) return;
       requestUpload(files);
     };
@@ -186,7 +211,7 @@ export default function DashboardLayout() {
       window.removeEventListener("dragleave", handleDragLeave);
       window.removeEventListener("drop", handleDrop);
     };
-  }, [requestUpload]);
+  }, [requestUpload, isDropDisabledRoute]);
 
   const uploadContext = useMemo(
     () => ({
@@ -236,9 +261,11 @@ export default function DashboardLayout() {
   }
 
   return (
-    <div className={cn("relative h-full flex flex-col bg-[#f0f0e8]")}>
+    <SidebarProvider>
+    <div className={cn("relative h-full flex bg-[#f0f0e8]")}>
+      <DashboardSidebar />
       {/* Main content */}
-      <main className="flex-1 overflow-auto flex flex-col">
+      <main className="flex-1 overflow-auto flex flex-col min-w-0">
         <DashboardUploadProvider value={uploadContext}>
           <Outlet />
         </DashboardUploadProvider>
@@ -247,10 +274,17 @@ export default function DashboardLayout() {
       {isGlobalDragActive && (
         <div className="pointer-events-none fixed inset-0 z-40">
           <div className="absolute inset-0 bg-[#1a1a1a]/20" />
-          <div className="absolute inset-4 border-4 border-dashed border-[#2d5a2d] bg-[#2d5a2d]/10 flex items-center justify-center">
-            <p className="border-2 border-[#1a1a1a] bg-[#f0f0e8] px-4 py-2 text-sm font-bold text-[#1a1a1a]">
-              Drop videos to upload
-            </p>
+          <div className="absolute inset-4 border-4 border-dashed border-[#FF6600] bg-[#FF6600]/10 flex items-center justify-center">
+            <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8] px-4 py-3 text-center">
+              <p className="text-sm font-black tracking-tight text-[#1a1a1a]">
+                Drop files to upload
+              </p>
+              <p className="text-[10px] font-mono text-[#888] mt-1 uppercase tracking-wider">
+                {routeProjectId
+                  ? "lands in this project"
+                  : "you'll pick a project after dropping"}
+              </p>
+            </div>
           </div>
         </div>
       )}
@@ -278,7 +312,7 @@ export default function DashboardLayout() {
           <DialogHeader>
             <DialogTitle>Choose a project</DialogTitle>
             <DialogDescription>
-              {pendingFiles?.length ? `Upload ${pendingFiles.length} video${pendingFiles.length > 1 ? "s" : ""} to:` : "Pick a project to start uploading."}
+              {pendingFiles?.length ? `Upload ${pendingFiles.length} file${pendingFiles.length > 1 ? "s" : ""} to:` : "Pick a project to start uploading."}
             </DialogDescription>
           </DialogHeader>
           {uploadTargets === undefined ? (
@@ -305,5 +339,6 @@ export default function DashboardLayout() {
         </DialogContent>
       </Dialog>
     </div>
+    </SidebarProvider>
   );
 }

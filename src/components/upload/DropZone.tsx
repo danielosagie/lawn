@@ -31,8 +31,12 @@ export function DropZone({ onFilesSelected, disabled, className }: DropZoneProps
 
       if (disabled) return;
 
-      const files = Array.from(e.dataTransfer.files).filter((file) =>
-        file.type.startsWith("video/")
+      // No video-only filter on drop — the dashboard accepts any
+      // file the user can drag in (videos, source files, contracts,
+      // images, archives). Filtering here would silently swallow
+      // perfectly-valid docs.
+      const files = Array.from(e.dataTransfer.files).filter(
+        (file) => file.size > 0,
       );
 
       if (files.length > 0) {
@@ -59,7 +63,7 @@ export function DropZone({ onFilesSelected, disabled, className }: DropZoneProps
       className={cn(
         "relative border-2 border-dashed p-12 text-center transition-all",
         isDragActive
-          ? "border-[#2d5a2d] bg-[#2d5a2d]/5"
+          ? "border-[#FF6600] bg-[#FF6600]/5"
           : "border-[#1a1a1a] hover:border-[#888] bg-[#f0f0e8]",
         disabled && "opacity-40 cursor-not-allowed",
         className
@@ -71,7 +75,6 @@ export function DropZone({ onFilesSelected, disabled, className }: DropZoneProps
     >
       <input
         type="file"
-        accept="video/*"
         multiple
         onChange={handleChange}
         disabled={disabled}
@@ -82,7 +85,7 @@ export function DropZone({ onFilesSelected, disabled, className }: DropZoneProps
           className={cn(
             "w-14 h-14 flex items-center justify-center transition-colors border-2 border-[#1a1a1a]",
             isDragActive
-              ? "bg-[#2d5a2d] text-[#f0f0e8]"
+              ? "bg-[#FF6600] text-[#f0f0e8]"
               : "bg-[#e8e8e0] text-[#888]"
           )}
         >
@@ -90,10 +93,11 @@ export function DropZone({ onFilesSelected, disabled, className }: DropZoneProps
         </div>
         <div>
           <p className="font-bold text-[#1a1a1a]">
-            {isDragActive ? "Drop to upload" : "Drop videos or click to upload"}
+            {isDragActive ? "Drop to add" : "Drop files here or click to add"}
           </p>
           <p className="text-sm text-[#888] mt-1">
-            MP4, MOV, WebM supported
+            Anything goes — video, docs, images, audio, .prproj. Video gets
+            transcoded; everything else is stored as-is.
           </p>
         </div>
       </div>

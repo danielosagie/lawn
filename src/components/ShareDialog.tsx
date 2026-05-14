@@ -1,13 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { useAction, useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -24,6 +23,7 @@ import {
   Lock,
   ExternalLink,
   Globe,
+  DollarSign,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -42,33 +42,86 @@ interface ShareDialogProps {
 export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
   const video = useQuery(api.videos.get, { videoId });
   const shareLinks = useQuery(api.shareLinks.list, { videoId });
+  const featureStatus = useQuery(api.featureFlags.getFeatureStatus, {});
   const createShareLink = useMutation(api.shareLinks.create);
   const deleteShareLink = useMutation(api.shareLinks.remove);
   const setVisibility = useMutation(api.videos.setVisibility);
+  const ensurePreviewAsset = useAction(
+    api.videoActions.ensurePreviewAssetForShareLink,
+  );
 
   const [isCreating, setIsCreating] = useState(false);
   const [isUpdatingVisibility, setIsUpdatingVisibility] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [paywallEnabled, setPaywallEnabled] = useState(false);
+  const [allowDownload, setAllowDownload] = useState(true);
   const [newLinkOptions, setNewLinkOptions] = useState({
     expiresInDays: undefined as number | undefined,
     password: undefined as string | undefined,
+    priceDollars: "" as string,
+    currency: "usd",
+    clientEmail: "" as string,
+    description: "" as string,
   });
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  // Paywall always usable in the dialog. In production it routes through
+  // real Stripe Checkout; in demo mode the share page's Pay button calls
+  // simulatePaymentForGrant. We surface a small badge if any of the
+  // production-grade services are missing so the user knows what mode
+  // they're in.
+  const paywallProductionReady = featureStatus?.paywallReady ?? false;
 
   const handleCreateLink = async () => {
+    setCreateError(null);
+    let paywallArg:
+      | { priceCents: number; currency: string; description?: string }
+      | undefined;
+    if (paywallEnabled) {
+      const dollars = parseFloat(newLinkOptions.priceDollars);
+      if (!Number.isFinite(dollars) || dollars < 0.5) {
+        setCreateError("Price must be at least $0.50.");
+        return;
+      }
+      paywallArg = {
+        priceCents: Math.round(dollars * 100),
+        currency: newLinkOptions.currency || "usd",
+        description: newLinkOptions.description || undefined,
+      };
+    }
     setIsCreating(true);
     try {
-      await createShareLink({
+      const created = await createShareLink({
         videoId,
         expiresInDays: newLinkOptions.expiresInDays,
-        allowDownload: false,
+        allowDownload,
         password: newLinkOptions.password,
+        paywall: paywallArg,
+        clientEmail: newLinkOptions.clientEmail || undefined,
       });
+      if (paywallArg && shareLinks) {
+        // Find the just-created link to kick off preview generation.
+        // We have the token; find by token via next render — simplest path is
+        // to look it up after-the-fact. The list query refreshes reactively.
+        const newLink = shareLinks.find((l) => l.token === created.token);
+        if (newLink) {
+          void ensurePreviewAsset({ shareLinkId: newLink._id });
+        }
+      }
       setNewLinkOptions({
         expiresInDays: undefined,
         password: undefined,
+        priceDollars: "",
+        currency: "usd",
+        clientEmail: "",
+        description: "",
       });
+      setPaywallEnabled(false);
     } catch (error) {
       console.error("Failed to create share link:", error);
+      setCreateError(
+        error instanceof Error ? error.message : "Failed to create share link",
+      );
     } finally {
       setIsCreating(false);
     }
@@ -114,78 +167,87 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Share video</DialogTitle>
-          <DialogDescription>
-            Public videos can be viewed by anyone with the URL. Only signed-in users can comment.
-          </DialogDescription>
+      <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto flex flex-col gap-3">
+        <DialogHeader className="flex-shrink-0">
+          <DialogTitle>Share</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-3 border-2 border-[#1a1a1a] p-4 bg-[#e8e8e0]">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="font-bold text-sm text-[#1a1a1a]">Visibility</h3>
-              <p className="text-xs text-[#666]">
-                Private disables the public URL. Restricted share links can still be used.
-              </p>
-            </div>
-            <Badge variant={video?.visibility === "public" ? "success" : "secondary"}>
-              {video?.visibility === "public" ? "Public" : "Private"}
-            </Badge>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              variant={video?.visibility === "public" ? "default" : "outline"}
-              disabled={isUpdatingVisibility || video === undefined}
-              onClick={() => void handleSetVisibility("public")}
-            >
-              <Globe className="mr-2 h-4 w-4" />
-              Public
-            </Button>
-            <Button
-              variant={video?.visibility === "private" ? "default" : "outline"}
-              disabled={isUpdatingVisibility || video === undefined}
-              onClick={() => void handleSetVisibility("private")}
-            >
-              <Lock className="mr-2 h-4 w-4" />
-              Private
-            </Button>
-          </div>
-
-          {publicWatchPath ? (
-            <div className="p-3 border-2 border-[#1a1a1a] bg-[#f0f0e8] space-y-2">
-              <div className="text-xs text-[#666]">Public URL</div>
-              <code className="block text-sm bg-[#e8e8e0] px-2 py-1 font-mono truncate">
-                {publicWatchPath}
-              </code>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  className="flex-1"
-                  onClick={handleCopyPublicLink}
-                  disabled={video?.visibility !== "public"}
-                >
-                  {copiedId === "public" ? <Check className="mr-2 h-4 w-4" /> : <Copy className="mr-2 h-4 w-4" />}
-                  Copy URL
-                </Button>
-                <Button
-                  variant="outline"
-                  className="flex-1"
-                  disabled={video?.visibility !== "public"}
-                  onClick={() => window.open(publicWatchPath, "_blank")}
-                >
-                  <ExternalLink className="mr-2 h-4 w-4" />
-                  Open
-                </Button>
-              </div>
-            </div>
-          ) : null}
+        {/* Streamlined: a single segmented toggle for Public/Private.
+            We drop the helper paragraph entirely — the labels +
+            section content already say enough. */}
+        <div className="flex border-2 border-[#1a1a1a]">
+          <button
+            type="button"
+            disabled={isUpdatingVisibility || video === undefined}
+            onClick={() => void handleSetVisibility("public")}
+            className={`flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors ${
+              video?.visibility === "public"
+                ? "bg-[#1a1a1a] text-[#f0f0e8]"
+                : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0]"
+            }`}
+          >
+            <Globe className="h-3.5 w-3.5" />
+            Public
+          </button>
+          <button
+            type="button"
+            disabled={isUpdatingVisibility || video === undefined}
+            onClick={() => void handleSetVisibility("private")}
+            className={`flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors border-l-2 border-[#1a1a1a] ${
+              video?.visibility === "private"
+                ? "bg-[#1a1a1a] text-[#f0f0e8]"
+                : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0]"
+            }`}
+          >
+            <Lock className="h-3.5 w-3.5" />
+            Private
+          </button>
         </div>
 
-        <div className="space-y-4 border-2 border-[#1a1a1a] p-4 bg-[#e8e8e0]">
-          <h3 className="font-bold text-sm text-[#1a1a1a]">Create restricted share link</h3>
+        {/* Public branch — just the URL + copy/open. */}
+        {video?.visibility === "public" && publicWatchPath ? (
+          <div className="space-y-3 border-2 border-[#1a1a1a] p-4 bg-[#f0f0e8]">
+            <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+              Public URL
+            </div>
+            <code className="block text-sm bg-[#e8e8e0] border border-[#1a1a1a] px-2 py-1.5 font-mono truncate">
+              {publicWatchPath}
+            </code>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={handleCopyPublicLink}
+              >
+                {copiedId === "public" ? (
+                  <Check className="mr-2 h-4 w-4" />
+                ) : (
+                  <Copy className="mr-2 h-4 w-4" />
+                )}
+                Copy URL
+              </Button>
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => window.open(publicWatchPath, "_blank")}
+              >
+                <ExternalLink className="mr-2 h-4 w-4" />
+                Open
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {/* Private branch — the restricted-link creator + existing
+            links. Hidden entirely when the video is public so the
+            dialog stays single-purpose. */}
+        {video?.visibility === "private" ? (
+        <>
+        <details className="space-y-4 border-2 border-[#1a1a1a] p-4 bg-[#e8e8e0] [&_summary]:cursor-pointer" open>
+          <summary className="font-bold text-sm text-[#1a1a1a]">
+            New link
+          </summary>
+          <div className="pt-2">
 
           <div>
             <label className="text-sm text-[#888]">Expiration</label>
@@ -246,16 +308,139 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
             />
           </div>
 
+          <div className="flex items-center justify-between gap-3 border-2 border-[#1a1a1a] bg-[#f0f0e8] p-3">
+            <div className="font-bold text-sm">Allow download</div>
+            <button
+              type="button"
+              onClick={() => setAllowDownload((d) => !d)}
+              aria-pressed={allowDownload}
+              className={`px-3 py-1 border-2 border-[#1a1a1a] font-bold text-xs ${
+                allowDownload
+                  ? "bg-[#FF6600] text-[#f0f0e8]"
+                  : "bg-[#e8e8e0] text-[#1a1a1a]"
+              }`}
+            >
+              {allowDownload ? "ON" : "OFF"}
+            </button>
+          </div>
+
+          <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8] p-3 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="font-bold text-sm flex items-center gap-2">
+                <DollarSign className="h-4 w-4" />
+                Paywall
+                {!paywallProductionReady ? (
+                  <span className="text-[10px] font-mono uppercase tracking-widest px-1.5 py-0.5 bg-[#1a1a1a] text-[#f0f0e8]">
+                    demo
+                  </span>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={() => setPaywallEnabled((p) => !p)}
+                aria-pressed={paywallEnabled}
+                className={`px-3 py-1 border-2 border-[#1a1a1a] font-bold text-xs ${
+                  paywallEnabled
+                    ? "bg-[#FF6600] text-[#f0f0e8]"
+                    : "bg-[#e8e8e0] text-[#1a1a1a]"
+                }`}
+              >
+                {paywallEnabled ? "ON" : "OFF"}
+              </button>
+            </div>
+            {paywallEnabled ? (
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <label className="text-xs text-[#888]">Price</label>
+                    <Input
+                      type="number"
+                      min={0.5}
+                      step={0.5}
+                      placeholder="500.00"
+                      value={newLinkOptions.priceDollars}
+                      onChange={(e) =>
+                        setNewLinkOptions((o) => ({
+                          ...o,
+                          priceDollars: e.target.value,
+                        }))
+                      }
+                      className="mt-1"
+                    />
+                  </div>
+                  <div className="w-24">
+                    <label className="text-xs text-[#888]">Currency</label>
+                    <Input
+                      value={newLinkOptions.currency.toUpperCase()}
+                      onChange={(e) =>
+                        setNewLinkOptions((o) => ({
+                          ...o,
+                          currency: e.target.value.toLowerCase().slice(0, 4),
+                        }))
+                      }
+                      className="mt-1 uppercase"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-[#888]">
+                    Client email (for invoice + watermark)
+                  </label>
+                  <Input
+                    type="email"
+                    placeholder="client@agency.com"
+                    value={newLinkOptions.clientEmail}
+                    onChange={(e) =>
+                      setNewLinkOptions((o) => ({
+                        ...o,
+                        clientEmail: e.target.value,
+                      }))
+                    }
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-[#888]">
+                    Invoice description (optional)
+                  </label>
+                  <Input
+                    placeholder="Final delivery: brand video v3"
+                    value={newLinkOptions.description}
+                    onChange={(e) =>
+                      setNewLinkOptions((o) => ({
+                        ...o,
+                        description: e.target.value,
+                      }))
+                    }
+                    className="mt-1"
+                  />
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          {createError ? (
+            <div className="text-xs text-[#dc2626] border-l-2 border-[#dc2626] pl-2">
+              {createError}
+            </div>
+          ) : null}
+
           <Button onClick={handleCreateLink} disabled={isCreating} className="w-full">
             <Plus className="mr-2 h-4 w-4" />
-            {isCreating ? "Creating..." : "Create restricted link"}
+            {isCreating ? "Creating…" : "Create link"}
           </Button>
-        </div>
+          </div>
+        </details>
 
         <Separator />
 
-        <div className="space-y-2">
-          <h3 className="font-bold text-sm text-[#1a1a1a]">Restricted links</h3>
+        <details className="space-y-2 [&_summary]:cursor-pointer" open>
+          <summary className="font-bold text-sm text-[#1a1a1a] flex items-center justify-between">
+            <span>Links</span>
+            <span className="text-[10px] font-mono font-normal text-[#888] uppercase tracking-wider">
+              {shareLinks?.length ?? 0}
+            </span>
+          </summary>
           {shareLinks === undefined ? (
             <p className="text-sm text-[#888]">Loading...</p>
           ) : shareLinks.length === 0 ? (
@@ -287,6 +472,13 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
                           Protected
                         </span>
                       ) : null}
+                      {link.paywall ? (
+                        <span className="flex items-center gap-1 text-[#FF6600] font-bold">
+                          <DollarSign className="h-3 w-3" />
+                          {(link.paywall.priceCents / 100).toFixed(2)}{" "}
+                          {link.paywall.currency.toUpperCase()}
+                        </span>
+                      ) : null}
                       {link.expiresAt ? (
                         <span>
                           Expires {formatRelativeTime(link.expiresAt)}
@@ -301,7 +493,7 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
                       onClick={() => handleCopyLink(link.token)}
                     >
                       {copiedId === link.token ? (
-                        <Check className="h-4 w-4 text-[#2d5a2d]" />
+                        <Check className="h-4 w-4 text-[#FF6600]" />
                       ) : (
                         <Copy className="h-4 w-4" />
                       )}
@@ -326,7 +518,9 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
               ))}
             </div>
           )}
-        </div>
+        </details>
+        </>
+        ) : null}
       </DialogContent>
     </Dialog>
   );

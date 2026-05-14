@@ -13,7 +13,7 @@ async function loadFont(url: string): Promise<ArrayBuffer> {
 }
 
 async function prepareBackground(): Promise<Buffer> {
-  const grassPath = join(process.cwd(), "public", "grassy-bg.avif");
+  const grassPath = join(process.cwd(), "public", "sandy-bg.jpg");
   const grassBuf = readFileSync(grassPath);
 
   // Resize/crop grass to OG dimensions, then darken for text readability

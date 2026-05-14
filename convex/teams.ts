@@ -113,10 +113,12 @@ export const listWithProjects = query({
           .query("projects")
           .withIndex("by_team", (q) => q.eq("teamId", team._id))
           .collect();
+        const live = projects.filter((p) => !p.deletedAt);
 
-        // Get video counts for each project
+        // Get video counts for each project. Soft-deleted projects
+        // are hidden from regular team views.
         const projectsWithCounts = await Promise.all(
-          projects.map(async (project) => {
+          live.map(async (project) => {
             const videos = await ctx.db
               .query("videos")
               .withIndex("by_project", (q) => q.eq("projectId", project._id))
@@ -239,6 +241,28 @@ export const getInvites = query({
       .collect();
 
     return invites.filter((i) => i.expiresAt > Date.now());
+  },
+});
+
+/**
+ * Cancel a pending invite. Admin-only on the team it belongs to.
+ * No-op if the invite has already been accepted or has expired (and
+ * therefore been pruned by the periodic cleanup) — those rows just
+ * aren't there to delete.
+ */
+export const revokeInvite = mutation({
+  args: {
+    teamId: v.id("teams"),
+    inviteId: v.id("teamInvites"),
+  },
+  handler: async (ctx, args) => {
+    await requireTeamAccess(ctx, args.teamId, "admin");
+    const invite = await ctx.db.get(args.inviteId);
+    if (!invite) return;
+    if (invite.teamId !== args.teamId) {
+      throw new Error("Invite belongs to a different team.");
+    }
+    await ctx.db.delete(invite._id);
   },
 });
 

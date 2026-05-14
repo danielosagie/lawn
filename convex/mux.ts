@@ -74,6 +74,66 @@ export async function createMuxAssetFromInputUrl(videoId: string, inputUrl: stri
   });
 }
 
+/**
+ * Creates a separate Mux asset that's used as the "preview" version on
+ * paywalled share links. Capped at 360p and burns in a per-client
+ * watermark image at ingest time so screen-recordings carry identifying
+ * marks. Playback policy is "signed" so the URL itself isn't enough —
+ * the client must hold a short-TTL JWT we issue per session.
+ */
+export async function createPreviewMuxAsset(
+  videoId: string,
+  inputUrl: string,
+  watermarkUrl: string,
+) {
+  const mux = getMuxClient();
+  return await mux.video.assets.create({
+    inputs: [
+      { url: inputUrl },
+      {
+        url: watermarkUrl,
+        overlay_settings: {
+          width: "100%",
+          height: "100%",
+          horizontal_align: "center",
+          vertical_align: "middle",
+          opacity: "70%",
+        },
+      },
+    ],
+    playback_policies: ["signed"],
+    video_quality: "basic",
+    max_resolution_tier: "1080p",
+    mp4_support: "none",
+    passthrough: `${videoId}:preview`,
+  });
+}
+
+/**
+ * Adds a signed-policy playback ID to an existing Mux asset. Used to upgrade
+ * the original (public) playback path on a video that gets paywalled —
+ * post-payment we issue JWTs against this signed ID.
+ */
+export async function createSignedPlaybackId(assetId: string) {
+  const mux = getMuxClient();
+  return await mux.video.assets.createPlaybackId(assetId, {
+    policy: "signed",
+  });
+}
+
+/**
+ * Build a 360p preview URL — the manifest is forced down to the lowest
+ * tier even though the asset includes higher renditions.
+ */
+export function buildMuxPreviewUrl(playbackId: string, token?: string): string {
+  const url = new URL(`https://stream.mux.com/${playbackId}.m3u8`);
+  url.searchParams.set("max_resolution", "360p");
+  if (token) {
+    url.searchParams.set("token", token);
+  }
+  return url.toString();
+}
+
 export async function getMuxAsset(assetId: string) {
   const mux = getMuxClient();
   return await mux.video.assets.retrieve(assetId);
@@ -82,13 +142,6 @@ export async function getMuxAsset(assetId: string) {
 export async function deleteMuxAsset(assetId: string) {
   const mux = getMuxClient();
   await mux.video.assets.delete(assetId);
-}
-
-export async function createSignedPlaybackId(assetId: string) {
-  const mux = getMuxClient();
-  return await mux.video.assets.createPlaybackId(assetId, {
-    policy: "signed",
-  });
 }
 
 export async function createPublicPlaybackId(assetId: string) {

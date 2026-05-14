@@ -7,7 +7,7 @@ export const Route = createFileRoute("/sign-in")({
   head: () =>
     seoHead({
       title: "Sign in",
-      description: "Sign in to your lawn account.",
+      description: "Sign in to your snip account.",
       path: "/sign-in",
       noIndex: true,
     }),

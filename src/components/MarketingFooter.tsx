@@ -13,7 +13,7 @@ export function MarketingFooter() {
               <li>
                 <Link
                   to="/pricing"
-                  className="hover:text-[#7cb87c] transition-colors"
+                  className="hover:text-[#FFB380] transition-colors"
                 >
                   Pricing
                 </Link>
@@ -21,7 +21,7 @@ export function MarketingFooter() {
               <li>
                 <Link
                   to="/sign-up"
-                  className="hover:text-[#7cb87c] transition-colors"
+                  className="hover:text-[#FFB380] transition-colors"
                 >
                   Start free trial
                 </Link>
@@ -29,7 +29,7 @@ export function MarketingFooter() {
               <li>
                 <Link
                   to="/sign-in"
-                  className="hover:text-[#7cb87c] transition-colors"
+                  className="hover:text-[#FFB380] transition-colors"
                 >
                   Sign in
                 </Link>
@@ -44,17 +44,17 @@ export function MarketingFooter() {
               <li>
                 <Link
                   to="/compare/frameio"
-                  className="hover:text-[#7cb87c] transition-colors"
+                  className="hover:text-[#FFB380] transition-colors"
                 >
-                  lawn vs Frame.io
+                  snip vs Frame.io
                 </Link>
               </li>
               <li>
                 <Link
                   to="/compare/wipster"
-                  className="hover:text-[#7cb87c] transition-colors"
+                  className="hover:text-[#FFB380] transition-colors"
                 >
-                  lawn vs Wipster
+                  snip vs Wipster
                 </Link>
               </li>
             </ul>
@@ -67,7 +67,7 @@ export function MarketingFooter() {
               <li>
                 <Link
                   to="/for/video-editors"
-                  className="hover:text-[#7cb87c] transition-colors"
+                  className="hover:text-[#FFB380] transition-colors"
                 >
                   For video editors
                 </Link>
@@ -75,7 +75,7 @@ export function MarketingFooter() {
               <li>
                 <Link
                   to="/for/agencies"
-                  className="hover:text-[#7cb87c] transition-colors"
+                  className="hover:text-[#FFB380] transition-colors"
                 >
                   For agencies
                 </Link>
@@ -92,7 +92,7 @@ export function MarketingFooter() {
                   href="https://github.com/pingdotgg/lawn"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="hover:text-[#7cb87c] transition-colors"
+                  className="hover:text-[#FFB380] transition-colors"
                 >
                   GitHub
                 </a>
@@ -101,7 +101,7 @@ export function MarketingFooter() {
           </div>
         </div>
         <div className="border-t border-[#333] pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
-          <span className="font-black text-3xl tracking-tighter">lawn.</span>
+          <span className="font-black text-3xl tracking-tighter">snip.</span>
           <span className="text-sm text-[#888]">
             Video review for creative teams.
           </span>

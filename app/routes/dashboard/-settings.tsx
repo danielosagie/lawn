@@ -1,65 +1,61 @@
-import { useAction, useConvex, useMutation } from "convex/react";
+import { useConvex, useMutation, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { CreditCard, Trash2, Check, Pencil } from "lucide-react";
-import { MemberInvite } from "@/components/teams/MemberInvite";
+import {
+  Trash2,
+  Pencil,
+  UserPlus,
+  Mail,
+  Copy,
+  Check,
+  ChevronDown,
+} from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { dashboardHomePath, teamHomePath } from "@/lib/routes";
+import { getInitials } from "@/lib/utils";
 import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
 import { useSettingsData } from "./-settings.data";
 import { prewarmTeam } from "./-team.data";
 import { DashboardHeader } from "@/components/DashboardHeader";
+import { Id } from "@convex/_generated/dataModel";
 
-type BillingPlan = "basic" | "pro";
+type Role = "admin" | "member" | "viewer";
 
-const GIBIBYTE = 1024 ** 3;
-const TEBIBYTE = 1024 ** 4;
-const TEAM_TRIAL_DAYS = 7;
-
-const BILLING_PLANS: Record<
-  BillingPlan,
-  {
-    label: string;
-    monthlyPriceUsd: number;
-    storageLimitBytes: number;
-    seats: string;
-  }
-> = {
-  basic: {
-    label: "Basic",
-    monthlyPriceUsd: 5,
-    storageLimitBytes: 100 * GIBIBYTE,
-    seats: "Unlimited",
-  },
-  pro: {
-    label: "Pro",
-    monthlyPriceUsd: 25,
-    storageLimitBytes: TEBIBYTE,
-    seats: "Unlimited",
-  },
+const ROLE_LABEL: Record<Role, string> = {
+  admin: "Admin",
+  member: "Member",
+  viewer: "Viewer",
 };
 
-const PLAN_RANK = {
-  basic: 0,
-  pro: 1,
-} as const satisfies Record<BillingPlan, number>;
+const ROLE_HELP: Record<Role, string> = {
+  admin: "Can manage members and team settings.",
+  member: "Can create projects, upload, comment, edit.",
+  viewer: "Read-only: watch + comment, no uploads.",
+};
 
-function normalizeTeamPlan(plan: string): BillingPlan {
-  return plan === "pro" || plan === "team" ? "pro" : "basic";
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes >= TEBIBYTE) return `${(bytes / TEBIBYTE).toFixed(1)} TB`;
-  return `${(bytes / GIBIBYTE).toFixed(1)} GB`;
-}
-
-function formatUtcDateFromUnixSeconds(unixSeconds: number): string {
-  return new Date(unixSeconds * 1000).toISOString().slice(0, 10);
-}
-
+/**
+ * Team Members page. Used to also house SaaS billing + plan
+ * selection, but those moved to /dashboard/billing once we went to
+ * account-level workspace billing. This page is now focused entirely
+ * on membership:
+ *
+ *   - Team identity (name, slug, delete)
+ *   - Invite by email (inline, with role picker + copyable link)
+ *   - Pending invites with revoke
+ *   - Members with role change + remove
+ *   - Pointer to per-team payouts (Stripe Connect) since *receiving*
+ *     client money is still team-scoped
+ */
 export default function TeamSettingsPage() {
   const params = useParams({ strict: false });
   const navigate = useNavigate({});
@@ -67,38 +63,39 @@ export default function TeamSettingsPage() {
   const convex = useConvex();
   const teamSlug = typeof params.teamSlug === "string" ? params.teamSlug : "";
 
-  const { context, team, members, billing } = useSettingsData({ teamSlug });
+  const { context, team, members } = useSettingsData({ teamSlug });
+  const invites = useQuery(
+    api.teams.getInvites,
+    team ? { teamId: team._id } : "skip",
+  );
   const updateTeam = useMutation(api.teams.update);
   const deleteTeam = useMutation(api.teams.deleteTeam);
-  const createSubscriptionCheckout = useAction(
-    api.billing.createSubscriptionCheckout,
-  );
-  const createCustomerPortalSession = useAction(
-    api.billing.createCustomerPortalSession,
-  );
-  const updateTeamSubscriptionPlan = useAction(
-    api.billing.updateTeamSubscriptionPlan,
-  );
+  const inviteMember = useMutation(api.teams.inviteMember);
+  const removeMember = useMutation(api.teams.removeMember);
+  const updateRole = useMutation(api.teams.updateMemberRole);
+  const revokeInvite = useMutation(api.teams.revokeInvite);
 
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState("");
-  const [memberDialogOpen, setMemberDialogOpen] = useState(false);
-  const [isCheckingOutPlan, setIsCheckingOutPlan] = useState<BillingPlan | null>(
-    null,
-  );
-  const [isChangingPlan, setIsChangingPlan] = useState<BillingPlan | null>(null);
-  const [isOpeningPortal, setIsOpeningPortal] = useState(false);
-  const [billingError, setBillingError] = useState<string | null>(null);
-  const [billingNotice, setBillingNotice] = useState<string | null>(null);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<Role>("member");
+  const [inviting, setInviting] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [lastInviteLink, setLastInviteLink] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const prewarmTeamIntentHandlers = useRoutePrewarmIntent(() => {
     if (!team?.slug) return;
     return prewarmTeam(convex, { teamSlug: team.slug });
   });
 
-  const canonicalSettingsPath = context ? `${context.canonicalPath}/settings` : null;
+  const canonicalSettingsPath = context
+    ? `${context.canonicalPath}/settings`
+    : null;
   const isSettingsPath = pathname.endsWith("/settings");
   const shouldCanonicalize =
-    isSettingsPath && !!canonicalSettingsPath && pathname !== canonicalSettingsPath;
+    isSettingsPath &&
+    !!canonicalSettingsPath &&
+    pathname !== canonicalSettingsPath;
 
   useEffect(() => {
     if (shouldCanonicalize && canonicalSettingsPath) {
@@ -109,7 +106,7 @@ export default function TeamSettingsPage() {
   if (context === undefined || shouldCanonicalize) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-[#888]">Loading...</div>
+        <div className="text-[#888]">Loading…</div>
       </div>
     );
   }
@@ -124,19 +121,6 @@ export default function TeamSettingsPage() {
 
   const isOwner = team.role === "owner";
   const isAdmin = team.role === "owner" || team.role === "admin";
-  const plan = billing?.plan ?? normalizeTeamPlan(team.plan);
-  const planConfig = BILLING_PLANS[plan];
-  const hasActiveSubscription = billing?.hasActiveSubscription ?? false;
-  const subscriptionStatus = billing?.subscriptionStatus ?? "not_subscribed";
-  const isTrialing = subscriptionStatus === "trialing";
-  const hasPortalAccess = isOwner && Boolean(billing?.stripeCustomerId);
-  const currentPlanLabel = hasActiveSubscription ? planConfig.label : "Unpaid";
-  const canDeleteTeam = isOwner && !hasActiveSubscription;
-
-  const storageUsed = billing?.storageUsedBytes ?? 0;
-  const storageLimit = planConfig.storageLimitBytes;
-  const storagePct =
-    storageLimit > 0 ? Math.min((storageUsed / storageLimit) * 100, 100) : 0;
 
   const handleSaveName = async () => {
     if (!editedName.trim()) return;
@@ -149,22 +133,14 @@ export default function TeamSettingsPage() {
   };
 
   const handleDeleteTeam = async () => {
-    if (hasActiveSubscription) {
-      setBillingError(
-        "Cancel the team's active subscription in billing before deleting this team.",
-      );
-      return;
-    }
-
     if (
       !confirm(
-        "Are you sure you want to delete this team? This action cannot be undone and will delete all projects and videos.",
+        "Delete this team? Every project, video, and member is removed permanently.",
       )
     ) {
       return;
     }
-
-    if (!confirm("Type the team name to confirm: " + team.name)) return;
+    if (!confirm(`Type the team name to confirm: ${team.name}`)) return;
 
     try {
       await deleteTeam({ teamId: team._id });
@@ -174,87 +150,67 @@ export default function TeamSettingsPage() {
     }
   };
 
-  const handleStartCheckout = async (targetPlan: BillingPlan) => {
-    if (typeof window === "undefined") return;
-    setBillingError(null);
-    setBillingNotice(null);
-    setIsCheckingOutPlan(targetPlan);
-
+  const handleInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteEmail.trim() || inviting) return;
+    setInviteError(null);
+    setInviting(true);
     try {
-      const settingsPath = canonicalSettingsPath ?? `/dashboard/${team.slug}/settings`;
-      const successUrl = `${window.location.origin}${settingsPath}?billing=success`;
-      const cancelUrl = `${window.location.origin}${settingsPath}?billing=cancel`;
-      const session = await createSubscriptionCheckout({
+      const token = await inviteMember({
         teamId: team._id,
-        plan: targetPlan,
-        successUrl,
-        cancelUrl,
+        email: inviteEmail.trim(),
+        role: inviteRole,
       });
-
-      if (!session.url) {
-        throw new Error("Stripe checkout did not return a redirect URL.");
-      }
-
-      window.location.assign(session.url);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unable to start checkout.";
-      setBillingError(message);
+      const baseUrl =
+        typeof window !== "undefined" ? window.location.origin : "";
+      setLastInviteLink(`${baseUrl}/invite/${token}`);
+      setInviteEmail("");
+    } catch (e) {
+      setInviteError(e instanceof Error ? e.message : "Couldn't send invite.");
     } finally {
-      setIsCheckingOutPlan(null);
+      setInviting(false);
     }
   };
 
-  const handleChangePlan = async (targetPlan: BillingPlan) => {
-    const targetConfig = BILLING_PLANS[targetPlan];
-    const confirmed = confirm(
-      `Upgrade ${team.name} to ${targetConfig.label} for $${targetConfig.monthlyPriceUsd}/month? Stripe will prorate the current billing period.`,
-    );
-
-    if (!confirmed) return;
-
-    setBillingError(null);
-    setBillingNotice(null);
-    setIsChangingPlan(targetPlan);
-
+  const copyInviteLink = async () => {
+    if (!lastInviteLink) return;
     try {
-      await updateTeamSubscriptionPlan({
-        teamId: team._id,
-        plan: targetPlan,
-      });
-      setBillingNotice(`Plan updated to ${targetConfig.label}.`);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unable to change plan.";
-      setBillingError(message);
-    } finally {
-      setIsChangingPlan(null);
+      await navigator.clipboard.writeText(lastInviteLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // ignored — clipboard may be blocked
     }
   };
 
-  const handleOpenPortal = async () => {
-    if (typeof window === "undefined") return;
-    setBillingError(null);
-    setBillingNotice(null);
-    setIsOpeningPortal(true);
-
+  const handleRoleChange = async (
+    membershipId: Id<"teamMembers">,
+    role: Role,
+  ) => {
     try {
-      const settingsPath = canonicalSettingsPath ?? `/dashboard/${team.slug}/settings`;
-      const returnUrl = `${window.location.origin}${settingsPath}`;
-      const session = await createCustomerPortalSession({
-        teamId: team._id,
-        returnUrl,
-      });
+      await updateRole({ teamId: team._id, membershipId, role });
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Couldn't update role.");
+    }
+  };
 
-      window.location.assign(session.url);
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Unable to open Stripe billing portal.";
-      setBillingError(message);
-    } finally {
-      setIsOpeningPortal(false);
+  const handleRemoveMember = async (
+    membershipId: Id<"teamMembers">,
+    name: string,
+  ) => {
+    if (!confirm(`Remove ${name} from ${team.name}?`)) return;
+    try {
+      await removeMember({ teamId: team._id, membershipId });
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Couldn't remove member.");
+    }
+  };
+
+  const handleRevoke = async (inviteId: Id<"teamInvites">) => {
+    try {
+      await revokeInvite({ teamId: team._id, inviteId });
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Couldn't revoke invite.");
     }
   };
 
@@ -267,20 +223,23 @@ export default function TeamSettingsPage() {
             href: teamHomePath(team.slug),
             prewarmIntentHandlers: prewarmTeamIntentHandlers,
           },
-          { label: "settings" },
+          { label: "members" },
         ]}
       />
 
       <div className="flex-1 overflow-auto">
-        <div className="max-w-5xl mx-auto px-6 lg:px-8 py-8">
-          {/* ── Hero: Team name + URL ── */}
-          <div className="mb-8">
+        <div className="max-w-3xl mx-auto px-6 lg:px-8 py-8 space-y-10">
+          {/* ── Team identity ── */}
+          <section>
+            <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-1">
+              Workspace · members
+            </p>
             {isEditingName ? (
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
                 <Input
                   value={editedName}
                   onChange={(e) => setEditedName(e.target.value)}
-                  className="text-4xl font-black tracking-tight h-auto py-1 px-2 border-b-2 border-[#1a1a1a] border-t-0 border-l-0 border-r-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0"
+                  className="text-3xl font-black tracking-tight h-auto py-1 px-2"
                   autoFocus
                   onKeyDown={(e) => {
                     if (e.key === "Enter") void handleSaveName();
@@ -300,7 +259,7 @@ export default function TeamSettingsPage() {
               </div>
             ) : (
               <div className="flex items-baseline gap-3 group">
-                <h1 className="text-4xl lg:text-5xl font-black tracking-tight text-[#1a1a1a]">
+                <h1 className="text-3xl lg:text-4xl font-black tracking-tight text-[#1a1a1a]">
                   {team.name}
                 </h1>
                 {isAdmin && (
@@ -316,269 +275,270 @@ export default function TeamSettingsPage() {
                 )}
               </div>
             )}
-            <p className="text-sm font-mono text-[#888] mt-1">
+            <p className="text-sm text-[#666] mt-2 max-w-prose">
+              Invite collaborators, set roles, and manage who has access to
+              this workspace's projects.
+            </p>
+            <p className="text-xs font-mono text-[#888] mt-3">
               {typeof window !== "undefined"
                 ? `${window.location.origin}${teamHomePath(team.slug)}`
                 : teamHomePath(team.slug)}
             </p>
-          </div>
+          </section>
 
-          {/* ── Stats strip ── */}
-          <div className="border-t-2 border-b-2 border-[#1a1a1a] py-5 mb-8 grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 lg:gap-12">
-            <div>
-              <p className="text-[10px] uppercase tracking-[0.2em] text-[#888] mb-1">
-                Plan
-              </p>
-              <div className="flex items-center gap-2">
-                <span className="text-xl font-black text-[#1a1a1a]">
-                  {currentPlanLabel}
-                </span>
-                {hasActiveSubscription ? (
-                  <Badge variant={isTrialing ? "warning" : "success"}>
-                    {isTrialing ? "Trialing" : "Active"}
-                  </Badge>
-                ) : (
-                  <Badge variant="warning">{subscriptionStatus}</Badge>
-                )}
+          {/* ── Invite member (inline, no dialog) ── */}
+          {isAdmin ? (
+            <section className="border-2 border-[#1a1a1a] p-5 bg-[#f0f0e8]">
+              <div className="flex items-center gap-2 mb-3">
+                <UserPlus className="h-4 w-4" />
+                <h2 className="font-black text-sm uppercase tracking-tight">
+                  Invite a member
+                </h2>
               </div>
-              {isTrialing && typeof billing?.currentPeriodEnd === "number" && (
-                <p className="text-xs text-[#888] mt-2">
-                  Trial ends {formatUtcDateFromUnixSeconds(billing.currentPeriodEnd)} UTC
-                </p>
-              )}
-            </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-[0.2em] text-[#888] mb-1">
-                Storage
-              </p>
-              <p className="text-xl font-black text-[#1a1a1a]">
-                {billing ? formatBytes(storageUsed) : "—"}
-                <span className="text-sm font-bold text-[#888]">
-                  {" "}
-                  / {formatBytes(storageLimit)}
-                </span>
-              </p>
-              <div className="h-1.5 bg-[#ddd] mt-2">
-                <div
-                  className="h-full bg-[#2d5a2d] transition-all duration-500"
-                  style={{ width: `${storagePct}%` }}
+              <form
+                onSubmit={(e) => void handleInvite(e)}
+                className="flex flex-col sm:flex-row gap-2"
+              >
+                <Input
+                  type="email"
+                  placeholder="teammate@studio.com"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  disabled={inviting}
+                  className="flex-1"
                 />
-              </div>
-            </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-[0.2em] text-[#888] mb-1">
-                Seats
+                <RolePicker
+                  value={inviteRole}
+                  onChange={setInviteRole}
+                  disabled={inviting}
+                />
+                <Button
+                  type="submit"
+                  disabled={inviting || !inviteEmail.trim()}
+                  className="bg-[#FF6600] hover:bg-[#FF7A1F]"
+                >
+                  <Mail className="h-4 w-4 mr-1.5" />
+                  {inviting ? "Sending…" : "Invite"}
+                </Button>
+              </form>
+              {inviteError ? (
+                <div className="text-xs font-bold text-[#dc2626] mt-2">
+                  {inviteError}
+                </div>
+              ) : null}
+              {lastInviteLink ? (
+                <div className="mt-3 border-2 border-[#1a1a1a] bg-[#e8e8e0] p-2 flex items-center gap-2">
+                  <code className="flex-1 text-xs font-mono truncate">
+                    {lastInviteLink}
+                  </code>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void copyInviteLink()}
+                  >
+                    {copied ? (
+                      <>
+                        <Check className="h-3.5 w-3.5 mr-1" />
+                        Copied
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-3.5 w-3.5 mr-1" />
+                        Copy link
+                      </>
+                    )}
+                  </Button>
+                </div>
+              ) : null}
+              <p className="text-xs text-[#666] mt-3">
+                {ROLE_HELP[inviteRole]}
               </p>
-              <p className="text-xl font-black text-[#1a1a1a]">
-                {planConfig.seats}
-              </p>
-            </div>
-          </div>
+            </section>
+          ) : null}
 
-          {/* ── Two-column: Plans + Members ── */}
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 lg:gap-12">
-            {/* Plans column */}
-            <div className="lg:col-span-3">
-              <h2 className="text-[10px] uppercase tracking-[0.2em] font-bold text-[#888] mb-4">
-                Plans
+          {/* ── Pending invites ── */}
+          {invites && invites.length > 0 ? (
+            <section>
+              <h2 className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-3">
+                Pending invites ({invites.length})
               </h2>
+              <div className="border-2 border-[#1a1a1a] divide-y divide-[#ccc] bg-[#f0f0e8]">
+                {invites.map((inv) => (
+                  <div
+                    key={inv._id}
+                    className="flex items-center gap-3 px-4 py-3"
+                  >
+                    <Mail className="h-4 w-4 text-[#888] flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold text-sm text-[#1a1a1a] truncate">
+                        {inv.email}
+                      </div>
+                      <div className="text-xs font-mono text-[#888]">
+                        Invited as {ROLE_LABEL[inv.role as Role] ?? inv.role}{" "}
+                        · expires{" "}
+                        {new Date(inv.expiresAt).toLocaleDateString()}
+                      </div>
+                    </div>
+                    {isAdmin ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void handleRevoke(inv._id)}
+                      >
+                        Revoke
+                      </Button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {(Object.keys(BILLING_PLANS) as BillingPlan[]).map((planId) => {
-                  const config = BILLING_PLANS[planId];
-                  const isCurrentPlan = planId === plan && hasActiveSubscription;
-                  const isUpgradePlan =
-                    isOwner &&
-                    hasActiveSubscription &&
-                    PLAN_RANK[planId] > PLAN_RANK[plan];
+          {/* ── Members list ── */}
+          <section>
+            <h2 className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-3">
+              Members ({members?.length ?? 0})
+            </h2>
+            <div className="border-2 border-[#1a1a1a] divide-y divide-[#ccc] bg-[#f0f0e8]">
+              {members === undefined ? (
+                <div className="px-4 py-3 text-sm text-[#888]">Loading…</div>
+              ) : members.length === 0 ? (
+                <div className="px-4 py-3 text-sm text-[#888]">
+                  No members yet.
+                </div>
+              ) : (
+                members.map((member) => {
+                  const isTeamOwner =
+                    team.ownerClerkId === member.userClerkId;
                   return (
                     <div
-                      key={planId}
-                      className={`border-2 p-5 transition-colors ${
-                        isCurrentPlan
-                          ? "border-[#2d5a2d] bg-[#2d5a2d] text-[#f0f0e8]"
-                          : "border-[#1a1a1a] bg-[#f0f0e8]"
-                      }`}
+                      key={member._id}
+                      className="flex items-center gap-3 px-4 py-3"
                     >
-                      <div className="flex items-center justify-between mb-3">
-                        <p
-                          className={`text-sm font-bold uppercase tracking-wider ${isCurrentPlan ? "text-[#f0f0e8]" : "text-[#888]"}`}
-                        >
-                          {config.label}
-                        </p>
-                        {isCurrentPlan && (
-                          <Check className="h-4 w-4 text-[#7cb87c]" />
-                        )}
+                      <Avatar className="h-8 w-8 flex-shrink-0">
+                        {member.userAvatarUrl ? (
+                          <AvatarImage
+                            src={member.userAvatarUrl}
+                            alt={member.userName}
+                          />
+                        ) : null}
+                        <AvatarFallback>
+                          {getInitials(member.userName)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-bold text-sm text-[#1a1a1a] truncate flex items-center gap-2">
+                          {member.userName}
+                          {isTeamOwner ? (
+                            <Badge variant="secondary">Owner</Badge>
+                          ) : null}
+                        </div>
+                        <div className="text-xs text-[#888] truncate">
+                          {member.userEmail}
+                        </div>
                       </div>
-                      <p
-                        className={`text-3xl font-black ${isCurrentPlan ? "text-[#f0f0e8]" : "text-[#1a1a1a]"}`}
-                      >
-                        ${config.monthlyPriceUsd}
-                        <span
-                          className={`text-sm font-bold ${isCurrentPlan ? "text-[#7cb87c]" : "text-[#888]"}`}
-                        >
-                          /mo
-                        </span>
-                      </p>
-                      <div
-                        className={`text-sm mt-3 space-y-0.5 ${isCurrentPlan ? "text-[#c8e0c8]" : "text-[#888]"}`}
-                      >
-                        <p>{config.seats} seats</p>
-                        <p>{formatBytes(config.storageLimitBytes)} storage</p>
-                      </div>
-                      {isOwner && !hasActiveSubscription && (
-                        <Button
-                          variant={planId === "pro" ? "primary" : "default"}
-                          className="w-full mt-4"
-                          disabled={
-                            isCheckingOutPlan !== null || isChangingPlan !== null
-                          }
-                          onClick={() => void handleStartCheckout(planId)}
-                        >
-                          <CreditCard className="mr-2 h-4 w-4" />
-                          {isCheckingOutPlan === planId
-                            ? "Redirecting..."
-                            : `Start ${config.label} Trial`}
-                        </Button>
-                      )}
-                      {isUpgradePlan && (
-                        <Button
-                          variant="primary"
-                          className="w-full mt-4"
-                          disabled={
-                            isCheckingOutPlan !== null || isChangingPlan !== null
-                          }
-                          onClick={() => void handleChangePlan(planId)}
-                        >
-                          <CreditCard className="mr-2 h-4 w-4" />
-                          {isChangingPlan === planId
-                            ? "Upgrading..."
-                            : `Upgrade to ${config.label}`}
-                        </Button>
+                      {isAdmin && !isTeamOwner ? (
+                        <>
+                          <RolePicker
+                            value={member.role as Role}
+                            onChange={(role) =>
+                              void handleRoleChange(member._id, role)
+                            }
+                            compact
+                          />
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-[#dc2626] hover:text-[#dc2626]"
+                            onClick={() =>
+                              void handleRemoveMember(
+                                member._id,
+                                member.userName,
+                              )
+                            }
+                            title="Remove"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </>
+                      ) : (
+                        <Badge variant="secondary">
+                          {ROLE_LABEL[member.role as Role] ?? member.role}
+                        </Badge>
                       )}
                     </div>
                   );
-                })}
-              </div>
-
-              {hasPortalAccess && (
-                <Button
-                  variant="outline"
-                  className="w-full mt-4"
-                  disabled={isOpeningPortal}
-                  onClick={() => void handleOpenPortal()}
-                >
-                  <CreditCard className="mr-2 h-4 w-4" />
-                  {isOpeningPortal
-                    ? "Opening billing portal..."
-                    : "Manage subscription"}
-                </Button>
-              )}
-
-              {billingError && (
-                <p className="text-sm font-bold text-[#dc2626] mt-3">
-                  {billingError}
-                </p>
-              )}
-              {billingNotice && (
-                <p className="text-sm font-bold text-[#2d5a2d] mt-3">
-                  {billingNotice}
-                </p>
-              )}
-
-              {!hasActiveSubscription && (
-                <p className="text-sm text-[#888] mt-3">
-                  An active subscription is required to create projects and upload
-                  videos. Eligible teams receive a {TEAM_TRIAL_DAYS}-day trial before
-                  billing starts.
-                </p>
+                })
               )}
             </div>
-
-            {/* Members column */}
-            <div className="lg:col-span-2">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-[10px] uppercase tracking-[0.2em] font-bold text-[#888]">
-                  Members
-                  <span className="ml-2 text-[#1a1a1a]">
-                    {members?.length || 0}
-                  </span>
-                </h2>
-                {isAdmin && (
-                  <button
-                    onClick={() => setMemberDialogOpen(true)}
-                    className="text-xs font-bold uppercase tracking-wider text-[#2d5a2d] hover:text-[#3a6a3a] underline underline-offset-2"
-                  >
-                    + Invite
-                  </button>
-                )}
-              </div>
-
-              <div className="border-t-2 border-[#1a1a1a]">
-                {members?.slice(0, 8).map((member) => (
-                  <div
-                    key={member._id}
-                    className="flex items-center justify-between py-3 border-b border-[#ccc]"
-                  >
-                    <div className="min-w-0">
-                      <p className="font-bold text-sm text-[#1a1a1a] truncate">
-                        {member.userName}
-                      </p>
-                      <p className="text-xs text-[#888] truncate">
-                        {member.userEmail}
-                      </p>
-                    </div>
-                    <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[#888] shrink-0 ml-3">
-                      {member.role}
-                    </span>
-                  </div>
-                ))}
-                {members && members.length > 8 && (
-                  <button
-                    onClick={() => setMemberDialogOpen(true)}
-                    className="text-xs text-[#888] hover:text-[#1a1a1a] py-3 underline"
-                  >
-                    +{members.length - 8} more
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
+          </section>
 
           {/* ── Danger zone ── */}
-          {isOwner && (
-            <div className="border-t-2 border-[#dc2626]/30 mt-16 pt-6 flex items-center justify-between">
+          {isOwner ? (
+            <section className="border-t-2 border-[#dc2626]/30 pt-6 flex items-center justify-between">
               <div>
-                <p className="text-sm font-bold text-[#1a1a1a]">
-                  Delete team
-                </p>
+                <p className="text-sm font-bold text-[#1a1a1a]">Delete team</p>
                 <p className="text-xs text-[#888] mt-0.5">
-                  {canDeleteTeam
-                    ? "Permanently remove this team, all projects, and videos."
-                    : "Cancel the active subscription before deleting this team."}
+                  Permanently remove this team, all projects, and videos.
                 </p>
               </div>
               <Button
                 variant="destructive"
                 size="sm"
-                onClick={handleDeleteTeam}
-                disabled={!canDeleteTeam}
+                onClick={() => void handleDeleteTeam()}
               >
                 <Trash2 className="mr-2 h-4 w-4" />
                 Delete
               </Button>
-            </div>
-          )}
+            </section>
+          ) : null}
         </div>
       </div>
-
-      {isAdmin && (
-        <MemberInvite
-          teamId={team._id}
-          open={memberDialogOpen}
-          onOpenChange={setMemberDialogOpen}
-        />
-      )}
     </div>
+  );
+}
+
+function RolePicker({
+  value,
+  onChange,
+  disabled,
+  compact,
+}: {
+  value: Role;
+  onChange: (next: Role) => void;
+  disabled?: boolean;
+  compact?: boolean;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          disabled={disabled}
+          className={
+            "inline-flex items-center gap-1 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-xs font-bold uppercase tracking-wider hover:bg-[#e8e8e0] " +
+            (compact ? "px-2 py-1" : "px-3 py-2")
+          }
+        >
+          {ROLE_LABEL[value]}
+          <ChevronDown className="h-3 w-3" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-[180px]">
+        {(Object.keys(ROLE_LABEL) as Role[]).map((r) => (
+          <DropdownMenuItem
+            key={r}
+            onClick={() => onChange(r)}
+            className="flex-col items-start gap-0.5"
+          >
+            <span className="font-bold">{ROLE_LABEL[r]}</span>
+            <span className="text-[10px] text-[#888] normal-case font-normal">
+              {ROLE_HELP[r]}
+            </span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

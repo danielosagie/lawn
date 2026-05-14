@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VideoInfra Desktop</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #f0f0e8;
+        color: #1a1a1a;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
+          Arial, sans-serif;
+        height: 100vh;
+      }
+      * { box-sizing: border-box; }
+      input, button, textarea {
+        font-family: inherit;
+        border: 2px solid #1a1a1a;
+        padding: 6px 10px;
+        background: #f0f0e8;
+        color: #1a1a1a;
+      }
+      input:focus { outline: 2px solid #2d5a2d; outline-offset: -1px; }
+      button {
+        cursor: pointer;
+        font-weight: 700;
+        background: #1a1a1a;
+        color: #f0f0e8;
+      }
+      button:hover:not(:disabled) { background: #2d5a2d; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      button.ghost {
+        background: transparent;
+        color: #1a1a1a;
+        border-color: #1a1a1a;
+      }
+      button.ghost:hover:not(:disabled) {
+        background: #1a1a1a;
+        color: #f0f0e8;
+      }
+      code, pre, .mono {
+        font-family: "SF Mono", Menlo, Consolas, monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

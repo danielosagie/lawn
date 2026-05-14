@@ -1,0 +1,432 @@
+"use client";
+
+import { Link, useLocation, useParams } from "@tanstack/react-router";
+import { UserButton, useUser } from "@clerk/tanstack-react-start";
+import { useQuery } from "convex/react";
+import {
+  ChevronsUpDown,
+  CreditCard,
+  Moon,
+  Plus,
+  Settings,
+  Sun,
+  Trash2,
+  Users,
+  Briefcase,
+} from "lucide-react";
+import { api } from "@convex/_generated/api";
+import { useTheme } from "@/components/theme/ThemeToggle";
+import { useState, type ReactNode } from "react";
+import { cn } from "@/lib/utils";
+import {
+  CommandSearch,
+  CommandSearchTrigger,
+} from "@/components/CommandSearch";
+import { CreateProjectDialog } from "@/components/projects/CreateProjectDialog";
+import { CreateTeamDialog } from "@/components/teams/CreateTeamDialog";
+import { useSidebarState } from "@/lib/sidebarContext";
+import {
+  projectPath,
+  teamHomePath,
+  teamSettingsPath,
+} from "@/lib/routes";
+
+export const SETTINGS_PATH = "/dashboard/settings";
+export const BILLING_PATH = "/dashboard/billing";
+export const TRASH_PATH = "/dashboard/trash";
+
+/**
+ * Persistent left sidebar. Layout:
+ *
+ *   [snip. mark]
+ *   [search trigger — opens command palette]
+ *   ── PROJECTS ──
+ *     project rows
+ *     [+ New project]
+ *   ── ACCOUNT ──
+ *     [Billing & usage]
+ *     [Team members]
+ *     [Settings]
+ *   ── footer: avatar + name + theme toggle
+ *
+ * "Workspace" / dashboard pseudo-link is intentionally absent — the
+ * snip. mark at the top already routes home, and "Home" is a place
+ * not a workspace.
+ */
+
+export function DashboardSidebar() {
+  const { collapsed } = useSidebarState();
+  const pathname = useLocation().pathname;
+  const params = useParams({ strict: false });
+  const activeTeamSlug =
+    typeof params.teamSlug === "string" ? params.teamSlug : undefined;
+  const activeProjectId =
+    typeof params.projectId === "string" ? params.projectId : undefined;
+  const teams = useQuery(api.teams.listWithProjects, {});
+  const { user } = useUser();
+
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [createProjectOpen, setCreateProjectOpen] = useState(false);
+  const [createTeamOpen, setCreateTeamOpen] = useState(false);
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+
+  // Flatten all projects from every team into a single list. Teams
+  // stay in the data model (for billing/membership) but the sidebar
+  // surfaces projects directly — fewer hops, fewer concepts.
+  const projects =
+    teams?.flatMap((t) =>
+      (t.projects ?? []).map((p) => ({
+        ...p,
+        teamSlug: t.slug,
+        teamName: t.name,
+      })),
+    ) ?? [];
+
+  // Pick a default team for the "+ New project" button. Owners of a
+  // team get to create projects there; if you only have member rows,
+  // we still surface it but the dialog will guide team selection.
+  const defaultTeam = teams?.find((t) => t.slug === activeTeamSlug) ?? teams?.[0];
+
+  if (collapsed) {
+    return (
+      <>
+        <aside className="hidden md:flex flex-col w-12 flex-shrink-0 border-r-2 border-[#1a1a1a] bg-[#f0f0e8] items-center py-3 gap-2">
+          <Link
+            to="/dashboard"
+            className="font-black text-lg tracking-tighter text-[#1a1a1a] hover:text-[#FF6600]"
+            title="Home"
+          >
+            l<span className="text-[#FF6600]">.</span>
+          </Link>
+          <CollapsedRail
+            pathname={pathname}
+            activeTeamSlug={defaultTeam?.slug}
+            onOpenSearch={() => setSearchOpen(true)}
+          />
+        </aside>
+        <CommandSearch open={searchOpen} onOpenChange={setSearchOpen} />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <aside className="hidden md:flex flex-col w-60 flex-shrink-0 border-r-2 border-[#1a1a1a] bg-[#f0f0e8] min-h-0">
+        {/* Header row: snip. brand on the left, workspace switcher
+            chip on the right. The switcher trigger is just a chevron
+            chip (no inline name, since the projects list below
+            already gives plenty of workspace context). */}
+        <div className="px-3 pt-4 pb-3 flex items-center gap-2">
+          <Link to="/dashboard" className="flex-1 min-w-0">
+            <span className="font-black text-xl tracking-tighter text-[#1a1a1a]">
+              snip<span className="text-[#FF6600]">.</span>
+            </span>
+          </Link>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setWorkspaceMenuOpen((o) => !o)}
+              className="inline-flex items-center gap-1.5 px-2 py-1 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-xs font-bold hover:bg-[#e8e8e0] transition-colors"
+              title="Switch workspace"
+            >
+              <span className="w-4 h-4 flex-shrink-0 bg-[#FF6600] text-[#f0f0e8] flex items-center justify-center font-black text-[9px]">
+                {(defaultTeam?.name ?? "?").slice(0, 1).toUpperCase()}
+              </span>
+              <ChevronsUpDown className="h-3 w-3 text-[#888]" />
+            </button>
+            {workspaceMenuOpen ? (
+              <>
+                <div
+                  className="fixed inset-0 z-30"
+                  onClick={() => setWorkspaceMenuOpen(false)}
+                />
+                <div className="absolute right-0 top-full mt-1 z-40 min-w-[220px] border-2 border-[#1a1a1a] bg-[#f0f0e8] shadow-[4px_4px_0px_0px_var(--shadow-color)]">
+                  <div className="px-2 py-1 text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] border-b border-[#ccc]">
+                    Workspaces
+                  </div>
+                  {(teams ?? []).map((t) => (
+                    <Link
+                      key={t._id}
+                      to={teamHomePath(t.slug)}
+                      onClick={() => setWorkspaceMenuOpen(false)}
+                      className={cn(
+                        "flex items-center gap-2 px-2 py-1.5 text-sm font-bold",
+                        t.slug === activeTeamSlug
+                          ? "bg-[#1a1a1a] text-[#f0f0e8]"
+                          : "text-[#1a1a1a] hover:bg-[#e8e8e0]",
+                      )}
+                    >
+                      <span className="w-5 h-5 flex-shrink-0 bg-[#FF6600] text-[#f0f0e8] flex items-center justify-center font-black text-[10px]">
+                        {t.name.slice(0, 1).toUpperCase()}
+                      </span>
+                      <span className="flex-1 truncate">{t.name}</span>
+                    </Link>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWorkspaceMenuOpen(false);
+                      setCreateTeamOpen(true);
+                    }}
+                    className="w-full flex items-center gap-2 px-2 py-1.5 text-sm font-bold text-[#FF6600] hover:bg-[#e8e8e0] border-t border-[#ccc]"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Create workspace
+                  </button>
+                </div>
+              </>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="px-3 pb-3">
+          <CommandSearchTrigger onOpen={() => setSearchOpen(true)} />
+        </div>
+
+        <nav className="px-2 flex-1 overflow-y-auto min-h-0">
+          <SidebarLabel>Projects</SidebarLabel>
+          {projects.length === 0 ? (
+            <div className="px-2 py-2 text-xs text-[#888]">
+              No projects yet
+            </div>
+          ) : (
+            projects.map((p) => (
+              <SidebarLink
+                key={p._id}
+                to={projectPath(p.teamSlug, p._id)}
+                icon={<Briefcase className="h-4 w-4" />}
+                active={activeProjectId === p._id}
+              >
+                {p.name}
+              </SidebarLink>
+            ))
+          )}
+          {/* "Recently deleted" lives at the bottom of the Projects
+              list, not in the Account section — it's a project-scoped
+              affordance, not an account-level one. */}
+          <SidebarLink
+            to={TRASH_PATH}
+            icon={<Trash2 className="h-4 w-4" />}
+            active={pathname.startsWith(TRASH_PATH)}
+          >
+            Recently deleted
+          </SidebarLink>
+        </nav>
+
+        {/* "+ New project" sits directly above the account section,
+            below the project list but visually separated. This makes
+            the primary creation action easy to spot without burying
+            it next to the avatar. */}
+        <div className="px-3 pt-3 pb-3 border-t-2 border-[#1a1a1a]">
+          <button
+            type="button"
+            onClick={() => setCreateProjectOpen(true)}
+            disabled={!defaultTeam}
+            title={
+              defaultTeam ? "Create a project" : "Create a workspace first"
+            }
+            className="w-full flex items-center justify-center gap-2 px-2 py-2 border-2 border-dashed border-[#1a1a1a] text-xs font-bold uppercase tracking-wider text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            New project
+          </button>
+        </div>
+
+        {/* Account links — no section heading, just the three rows
+            pinned above the footer. */}
+        <div className="px-2 pb-2 pt-2 border-t-2 border-[#1a1a1a]">
+          <SidebarLink
+            to={BILLING_PATH}
+            icon={<CreditCard className="h-4 w-4" />}
+            active={pathname.startsWith(BILLING_PATH)}
+          >
+            Billing &amp; usage
+          </SidebarLink>
+          {defaultTeam ? (
+            <SidebarLink
+              to={teamSettingsPath(defaultTeam.slug)}
+              icon={<Users className="h-4 w-4" />}
+              active={pathname.startsWith(
+                `/dashboard/${defaultTeam.slug}/settings`,
+              )}
+            >
+              Team members
+            </SidebarLink>
+          ) : null}
+          <SidebarLink
+            to={SETTINGS_PATH}
+            icon={<Settings className="h-4 w-4" />}
+            active={pathname.startsWith(SETTINGS_PATH)}
+          >
+            Settings
+          </SidebarLink>
+        </div>
+
+        <SidebarFooter
+          name={user?.fullName ?? user?.firstName ?? user?.username ?? ""}
+        />
+      </aside>
+
+      <CommandSearch open={searchOpen} onOpenChange={setSearchOpen} />
+      {defaultTeam ? (
+        <CreateProjectDialog
+          open={createProjectOpen}
+          onOpenChange={setCreateProjectOpen}
+          teamId={defaultTeam._id}
+          teamSlug={defaultTeam.slug}
+        />
+      ) : null}
+      <CreateTeamDialog
+        open={createTeamOpen}
+        onOpenChange={setCreateTeamOpen}
+      />
+    </>
+  );
+}
+
+function CollapsedRail({
+  pathname,
+  activeTeamSlug,
+  onOpenSearch,
+}: {
+  pathname: string;
+  activeTeamSlug: string | undefined;
+  onOpenSearch: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-1 mt-2">
+      <button
+        type="button"
+        onClick={onOpenSearch}
+        className="p-1.5 text-[#888] hover:text-[#1a1a1a] hover:bg-[#e8e8e0]"
+        title="Search (⌘K)"
+      >
+        <Briefcase className="h-4 w-4" />
+      </button>
+      <Link
+        to={BILLING_PATH}
+        title="Billing & usage"
+        className={cn(
+          "p-1.5",
+          pathname.startsWith(BILLING_PATH)
+            ? "bg-[#1a1a1a] text-[#f0f0e8]"
+            : "text-[#888] hover:text-[#1a1a1a] hover:bg-[#e8e8e0]",
+        )}
+      >
+        <CreditCard className="h-4 w-4" />
+      </Link>
+      {activeTeamSlug ? (
+        <Link
+          to={teamSettingsPath(activeTeamSlug)}
+          title="Team members"
+          className={cn(
+            "p-1.5",
+            pathname.includes("/settings")
+              ? "bg-[#1a1a1a] text-[#f0f0e8]"
+              : "text-[#888] hover:text-[#1a1a1a] hover:bg-[#e8e8e0]",
+          )}
+        >
+          <Users className="h-4 w-4" />
+        </Link>
+      ) : null}
+      <Link
+        to={SETTINGS_PATH}
+        title="Settings"
+        className={cn(
+          "p-1.5",
+          pathname.startsWith(SETTINGS_PATH)
+            ? "bg-[#1a1a1a] text-[#f0f0e8]"
+            : "text-[#888] hover:text-[#1a1a1a] hover:bg-[#e8e8e0]",
+        )}
+      >
+        <Settings className="h-4 w-4" />
+      </Link>
+    </div>
+  );
+}
+
+function SidebarLabel({ children }: { children: ReactNode }) {
+  return (
+    <div className="px-2 py-1 text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+      {children}
+    </div>
+  );
+}
+
+function SidebarLink({
+  to,
+  icon,
+  active,
+  children,
+}: {
+  to: string;
+  icon?: ReactNode;
+  active?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <Link
+      to={to}
+      preload="intent"
+      className={cn(
+        "flex items-center gap-2 px-2 py-1.5 text-sm font-bold border-2 transition-colors",
+        active
+          ? "bg-[#1a1a1a] text-[#f0f0e8] border-[#1a1a1a]"
+          : "text-[#1a1a1a] border-transparent hover:bg-[#e8e8e0]",
+      )}
+    >
+      <span className="flex-shrink-0">{icon}</span>
+      <span className="truncate flex-1">{children}</span>
+    </Link>
+  );
+}
+
+function SidebarFooter({ name }: { name: string }) {
+  const { theme, toggleTheme, mounted } = useTheme();
+  return (
+    <div className="border-t-2 border-[#1a1a1a] px-3 py-2 flex items-center gap-2">
+      <UserButton
+        appearance={{
+          variables: {
+            // Use theme tokens so the popover follows light/dark.
+            colorText: "var(--foreground)",
+            colorTextSecondary: "var(--foreground-muted)",
+            colorBackground: "var(--background)",
+            colorNeutral: "var(--border)",
+          },
+          elements: {
+            avatarBox: "w-7 h-7 rounded-none border-2 border-[var(--border)]",
+            userButtonPopoverCard:
+              "bg-[var(--background)] border-2 border-[var(--border)] rounded-none shadow-[8px_8px_0px_0px_var(--shadow-color)]",
+            userButtonPopoverActionButton:
+              "!text-[var(--foreground)] hover:!bg-[var(--surface-alt)] rounded-none",
+            userButtonPopoverActionButtonText:
+              "!text-[var(--foreground)] hover:!text-[var(--foreground)] font-mono font-bold",
+            userButtonPopoverActionButtonIcon:
+              "!text-[var(--foreground)] hover:!text-[var(--foreground)]",
+            userButtonPopoverFooter: "hidden",
+          },
+        }}
+      />
+      <div className="flex-1 min-w-0">
+        <div className="font-bold text-xs text-[var(--foreground)] truncate">
+          {name || "Account"}
+        </div>
+      </div>
+      <button
+        onClick={toggleTheme}
+        className="p-1 text-[#888] hover:text-[#1a1a1a] hover:bg-[#e8e8e0] transition-colors"
+        title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+        aria-label="Toggle theme"
+      >
+        {!mounted ? (
+          <span className="block h-4 w-4" />
+        ) : theme === "dark" ? (
+          <Sun className="h-4 w-4" />
+        ) : (
+          <Moon className="h-4 w-4" />
+        )}
+      </button>
+    </div>
+  );
+}

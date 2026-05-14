@@ -1,63 +1,56 @@
-import { useConvex } from "convex/react";
-import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
+import { useConvex, useMutation, useQuery } from "convex/react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, Plus, ArrowRight, Folder } from "lucide-react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Plus,
+  Folder,
+  Sparkles,
+  Trash2,
+  Briefcase,
+  AlertCircle,
+} from "lucide-react";
+import { CreateProjectDialog } from "@/components/projects/CreateProjectDialog";
 import { CreateTeamDialog } from "@/components/teams/CreateTeamDialog";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { teamHomePath, teamSettingsPath, projectPath } from "@/lib/routes";
+import { projectPath } from "@/lib/routes";
 import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
 import { prewarmProject } from "./-project.data";
 import { useDashboardIndexData } from "./-index.data";
 import { Id } from "@convex/_generated/dataModel";
+import { api } from "@convex/_generated/api";
 import { DashboardHeader } from "@/components/DashboardHeader";
 
 export const Route = createFileRoute("/dashboard/")({
   component: DashboardPage,
 });
 
-type DashboardProjectCardProps = {
+type FlatProject = {
+  _id: Id<"projects">;
+  name: string;
+  videoCount: number;
   teamSlug: string;
-  project: {
-    _id: Id<"projects">;
-    name: string;
-    videoCount: number;
-  };
-  onOpen: () => void;
+  teamName: string;
 };
 
-function formatTeamPlanLabel(
-  plan: string,
-  billingStatus?: string,
-  stripeSubscriptionId?: string,
-) {
-  if (!stripeSubscriptionId && billingStatus !== "active") {
-    return "Unpaid";
-  }
-
-  if (
-    billingStatus &&
-    billingStatus !== "active" &&
-    billingStatus !== "trialing" &&
-    billingStatus !== "past_due"
-  ) {
-    return "Unpaid";
-  }
-  if (plan === "pro" || plan === "team") return "Pro";
-  return "Basic";
-}
-
 function DashboardProjectCard({
-  teamSlug,
   project,
   onOpen,
-}: DashboardProjectCardProps) {
+}: {
+  project: FlatProject;
+  onOpen: () => void;
+}) {
   const convex = useConvex();
   const prewarmIntentHandlers = useRoutePrewarmIntent(() =>
     prewarmProject(convex, {
-      teamSlug,
+      teamSlug: project.teamSlug,
       projectId: project._id,
     }),
   );
@@ -72,59 +65,145 @@ function DashboardProjectCard({
         <div className="flex-1 min-w-0">
           <CardTitle className="text-base truncate">{project.name}</CardTitle>
           <CardDescription className="mt-1">
-            {project.videoCount} video{project.videoCount !== 1 ? "s" : ""}
+            {project.videoCount} item{project.videoCount !== 1 ? "s" : ""}
           </CardDescription>
         </div>
       </CardHeader>
       <CardContent>
-        <div className="flex items-center justify-between text-sm text-[#888] group-hover:text-[#1a1a1a] transition-colors">
-          <span>Open project</span>
-          <ArrowRight className="h-4 w-4" />
+        <div className="flex items-center justify-between text-xs font-mono text-[#888] group-hover:text-[#1a1a1a] transition-colors">
+          <span className="truncate">{project.teamName}</span>
+          <span>open →</span>
         </div>
       </CardContent>
     </Card>
   );
 }
 
+/**
+ * Home page. Renamed from "Dashboard" — the sidebar now shows projects
+ * directly, so this page is mostly a poster-style grid of every
+ * project you can reach across all your teams, plus a drop zone for
+ * sharing general workspace documents.
+ *
+ * No kanban view, no per-team billing/manage links: those have moved
+ * to the sidebar's Account section.
+ *
+ * Demo controls (seed/clear) only render in dev so reviewers can
+ * test the seed → clear loop. Production builds hide them entirely.
+ */
 export default function DashboardPage() {
   const { teams } = useDashboardIndexData();
   const navigate = useNavigate({});
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [createProjectOpen, setCreateProjectOpen] = useState(false);
+  const [createTeamOpen, setCreateTeamOpen] = useState(false);
+  const demoStatus = useQuery(api.demoSeed.isDemoMode, {});
+  const seedDemoData = useMutation(api.demoSeed.seedDemoData);
+  const clearDemoData = useMutation(api.demoSeed.clearDemoData);
+  const [seeding, setSeeding] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const isLoading = teams === undefined;
+  // Only show demo affordances on dev builds. `import.meta.env.DEV` is
+  // injected by Vite — true on `bun dev`, false on production builds.
+  const isDev = typeof import.meta !== "undefined" && import.meta.env?.DEV;
+  const showDemoControls = isDev && demoStatus?.enabled === true;
 
-  // Empty state - no teams
+  // Flatten teams → projects so the user just sees a single grid.
+  // Teams are still a concept in the data model (for billing,
+  // membership), but they're not surfaced as separate sections here.
+  const flatProjects: FlatProject[] =
+    teams?.flatMap((t) =>
+      t.projects.map((p) => ({
+        _id: p._id,
+        name: p.name,
+        videoCount: p.videoCount,
+        teamSlug: t.slug,
+        teamName: t.name,
+      })),
+    ) ?? [];
+
+  // Default team to create a project in — the first team the user
+  // owns. If they don't have one yet, we fall back to the team-create
+  // dialog (since you need a team to hold a project under the
+  // current schema).
+  const defaultTeam = teams?.[0];
+
+  const handleSeed = async () => {
+    setSeeding(true);
+    try {
+      const result = await seedDemoData({});
+      navigate({ to: projectPath(result.teamSlug, result.projectId) });
+    } catch (e) {
+      console.error("seed failed", e);
+    } finally {
+      setSeeding(false);
+    }
+  };
+
+  const handleClear = async () => {
+    if (
+      !confirm(
+        "Delete the Demo Studio workspace and everything inside it? Your real teams are untouched.",
+      )
+    )
+      return;
+    setClearing(true);
+    try {
+      await clearDemoData({});
+    } catch (e) {
+      console.error("clear failed", e);
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  const handleNewProject = () => {
+    if (defaultTeam) {
+      setCreateProjectOpen(true);
+    } else {
+      setCreateTeamOpen(true);
+    }
+  };
+
+  // Empty state — user has no teams at all.
   if (teams && teams.length === 0) {
     return (
       <div className="h-full flex flex-col">
-        <DashboardHeader paths={[{ label: "dashboard" }]} />
-
+        <DashboardHeader />
         <div className="flex-1 flex items-center justify-center p-8 animate-in fade-in duration-300">
           <Card className="max-w-sm w-full text-center">
             <CardHeader>
               <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-2">
-                <Users className="h-6 w-6 text-[#888]" />
+                <Folder className="h-6 w-6 text-[#888]" />
               </div>
-              <CardTitle className="text-lg">Create your first team</CardTitle>
+              <CardTitle className="text-lg">Create your workspace</CardTitle>
               <CardDescription>
-                Teams help you organize projects and collaborate on video reviews.
+                Spin up a workspace and start a project — collaborators get
+                invited from the team page.
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <Button
-                className="w-full"
-                onClick={() => setCreateDialogOpen(true)}
-              >
+            <CardContent className="space-y-2">
+              <Button className="w-full" onClick={() => setCreateTeamOpen(true)}>
                 <Plus className="mr-1.5 h-4 w-4" />
-                Create a team
+                Create workspace
               </Button>
+              {showDemoControls ? (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => void handleSeed()}
+                  disabled={seeding}
+                >
+                  <Sparkles className="mr-1.5 h-4 w-4" />
+                  {seeding ? "Seeding…" : "Or: load demo data"}
+                </Button>
+              ) : null}
             </CardContent>
           </Card>
         </div>
-
         <CreateTeamDialog
-          open={createDialogOpen}
-          onOpenChange={setCreateDialogOpen}
+          open={createTeamOpen}
+          onOpenChange={setCreateTeamOpen}
         />
       </div>
     );
@@ -132,94 +211,113 @@ export default function DashboardPage() {
 
   return (
     <div className="h-full flex flex-col">
-      <DashboardHeader paths={[{ label: "dashboard" }]}>
-        <Button onClick={() => setCreateDialogOpen(true)}>
-          <Plus className="mr-1.5 h-4 w-4" />
-          New team
-        </Button>
+      <DashboardHeader>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {showDemoControls ? (
+            <>
+              <Button
+                variant="outline"
+                onClick={() => void handleClear()}
+                disabled={clearing || seeding}
+                title="Wipe seeded demo data"
+              >
+                <Trash2 className="mr-1.5 h-4 w-4" />
+                {clearing ? "Clearing…" : "Clear demo"}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => void handleSeed()}
+                disabled={seeding || clearing}
+              >
+                <Sparkles className="mr-1.5 h-4 w-4" />
+                {seeding ? "Seeding…" : "Seed demo data"}
+              </Button>
+            </>
+          ) : null}
+          <Button onClick={handleNewProject}>
+            <Plus className="mr-1.5 h-4 w-4" />
+            New project
+          </Button>
+        </div>
       </DashboardHeader>
 
-      <div className="flex-1 overflow-auto p-6 space-y-12">
+      <div className="flex-1 overflow-auto p-6 space-y-8">
+        {/* No inline DropZone — the entire dashboard catches OS file
+            drops via the layout-level handler. Drop anywhere and the
+            project picker pops up if we're not already inside one. */}
+
         <div
           className={cn(
             "transition-opacity duration-300",
-            isLoading ? "opacity-0" : "opacity-100"
+            isLoading ? "opacity-0" : "opacity-100",
           )}
         >
-          {teams?.map((team) => {
-            if (!team) return null;
-            return (
-              <div key={team._id} className="mb-12 last:mb-0">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-6">
-                  <div className="flex items-center gap-3">
-                    <h2 className="text-xl font-black text-[#1a1a1a]">{team.name}</h2>
-                    <Badge variant="secondary">
-                      {formatTeamPlanLabel(
-                        team.plan,
-                        team.billingStatus,
-                        team.stripeSubscriptionId,
-                      )}
-                    </Badge>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <Link
-                      to={teamSettingsPath(team.slug)}
-                      className="text-[#888] hover:text-[#1a1a1a] text-sm font-bold transition-colors"
-                    >
-                      Billing
-                    </Link>
-                    <Link
-                      to={teamHomePath(team.slug)}
-                      className="text-[#888] hover:text-[#1a1a1a] text-sm font-bold flex items-center gap-1 transition-colors"
-                    >
-                      Manage team <ArrowRight className="h-3.5 w-3.5" />
-                    </Link>
-                  </div>
-                </div>
-                
-                {team.projects.length === 0 ? (
-                  <Card className="max-w-sm text-center">
-                    <CardHeader>
-                      <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-2">
-                        <Folder className="h-6 w-6 text-[#888]" />
-                      </div>
-                      <CardTitle className="text-lg">No projects yet</CardTitle>
-                      <CardDescription>
-                        Head over to the team page to create your first project.
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <Button
-                        variant="outline"
-                        className="w-full"
-                        onClick={() => navigate({ to: teamHomePath(team.slug) })}
-                      >
-                        Open team
-                      </Button>
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                    {team.projects.map((project) => (
-                      <DashboardProjectCard
-                        key={project._id}
-                        teamSlug={team.slug}
-                        project={project}
-                        onOpen={() => navigate({ to: projectPath(team.slug, project._id) })}
-                      />
-                    ))}
-                  </div>
-                )}
+          <div className="flex items-center gap-2 mb-3">
+            <Briefcase className="h-4 w-4 text-[#888]" />
+            <h2 className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#888]">
+              Projects
+            </h2>
+          </div>
+          {flatProjects.length === 0 ? (
+            // Full-width dashed dropzone — matches the empty-folder
+            // affordance you get inside a project. Drop files anywhere
+            // on the page to upload (the layout-level handler picks
+            // them up); use the button if you'd rather pick.
+            <div className="border-2 border-dashed border-[#1a1a1a] bg-[#f0f0e8] flex flex-col items-center justify-center text-center px-8 py-16 min-h-[320px]">
+              <div className="w-14 h-14 bg-[#e8e8e0] border-2 border-[#1a1a1a] flex items-center justify-center mb-4">
+                <Folder className="h-7 w-7 text-[#888]" />
               </div>
-            );
-          })}
+              <h3 className="font-black text-xl tracking-tight text-[#1a1a1a]">
+                No projects yet
+              </h3>
+              <p className="text-sm text-[#666] mt-2 max-w-md">
+                Drop files anywhere on this page to upload, or start a
+                project from scratch with the button above. Everything
+                you upload lands in a project — projects act like
+                folders for the rest of your team.
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {flatProjects.map((project) => (
+                <DashboardProjectCard
+                  key={project._id}
+                  project={project}
+                  onOpen={() =>
+                    navigate({
+                      to: projectPath(project.teamSlug, project._id),
+                    })
+                  }
+                />
+              ))}
+            </div>
+          )}
         </div>
+
+        {showDemoControls ? (
+          <div className="max-w-2xl text-xs text-[#888] font-mono flex items-start gap-2 border-2 border-dashed border-[#1a1a1a] p-3">
+            <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+            <div>
+              Demo controls are visible because Stripe + Mux + Storage are
+              all unset and this is a <strong>dev</strong> build. Production
+              hides them entirely.
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <CreateTeamDialog
-        open={createDialogOpen}
-        onOpenChange={setCreateDialogOpen}
+        open={createTeamOpen}
+        onOpenChange={setCreateTeamOpen}
       />
+      {defaultTeam ? (
+        <CreateProjectDialog
+          open={createProjectOpen}
+          onOpenChange={setCreateProjectOpen}
+          teamId={defaultTeam._id}
+          teamSlug={defaultTeam.slug}
+        />
+      ) : null}
     </div>
   );
 }

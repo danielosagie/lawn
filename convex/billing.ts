@@ -16,8 +16,24 @@ import {
   type TeamPlan,
 } from "./billingHelpers";
 
-const stripeClient = new StripeSubscriptions(components.stripe, {});
-const stripe = new Stripe(stripeClient.apiKey);
+// IMPORTANT: pass an explicit fallback so the component's `_apiKey` field is
+// never undefined. The component's `apiKey` getter throws on access when
+// undefined, and Convex's module analyzer evaluates module-level expressions
+// at push time — without the fallback, push fails before the deploy can
+// even start in demo mode. The placeholder value is never actually used
+// against Stripe; real Stripe calls are gated behind featureFlags elsewhere.
+const stripeClient = new StripeSubscriptions(components.stripe, {
+  STRIPE_SECRET_KEY:
+    process.env.STRIPE_SECRET_KEY ?? "sk_test_demo_placeholder_not_used",
+});
+
+let cachedStripe: Stripe | null = null;
+function getStripe(): Stripe {
+  if (cachedStripe) return cachedStripe;
+  cachedStripe = new Stripe(stripeClient.apiKey);
+  return cachedStripe;
+}
+
 const TEAM_TRIAL_DAYS = 7;
 const PLAN_RANK = {
   basic: 0,
@@ -121,7 +137,7 @@ export const createSubscriptionCheckout = action({
       sessionParams.customer = stripeCustomerId;
     }
 
-    const session = await stripe.checkout.sessions.create(sessionParams);
+    const session = await getStripe().checkout.sessions.create(sessionParams);
     return {
       sessionId: session.id,
       url: session.url,
@@ -203,7 +219,7 @@ export const updateTeamSubscriptionPlan = action({
     }
 
     const stripePriceId = getStripePriceIdForPlan(args.plan);
-    const subscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);
+    const subscription = await getStripe().subscriptions.retrieve(stripeSubscriptionId);
 
     if (!hasActiveTeamSubscriptionStatus(subscription.status)) {
       throw new Error("Only active subscriptions can be upgraded.");
@@ -228,7 +244,7 @@ export const updateTeamSubscriptionPlan = action({
       throw new Error("Use the billing portal to downgrade this subscription.");
     }
 
-    const updatedSubscription = await stripe.subscriptions.update(
+    const updatedSubscription = await getStripe().subscriptions.update(
       stripeSubscriptionId,
       {
         items: [

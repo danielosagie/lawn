@@ -23,13 +23,19 @@ import { Route as ShareTokenRouteImport } from './routes/share.$token'
 import { Route as InviteTokenRouteImport } from './routes/invite.$token'
 import { Route as ForVideoEditorsRouteImport } from './routes/for.video-editors'
 import { Route as ForAgenciesRouteImport } from './routes/for.agencies'
+import { Route as DashboardTrashRouteImport } from './routes/dashboard/trash'
+import { Route as DashboardSettingsRouteImport } from './routes/dashboard/settings'
+import { Route as DashboardBillingRouteImport } from './routes/dashboard/billing'
 import { Route as DashboardTeamSlugRouteImport } from './routes/dashboard/$teamSlug'
 import { Route as CompareWipsterRouteImport } from './routes/compare.wipster'
 import { Route as CompareFrameioRouteImport } from './routes/compare.frameio'
 import { Route as DashboardTeamSlugIndexRouteImport } from './routes/dashboard/$teamSlug.index'
 import { Route as DashboardTeamSlugSettingsRouteImport } from './routes/dashboard/$teamSlug.settings'
 import { Route as DashboardTeamSlugProjectIdRouteImport } from './routes/dashboard/$teamSlug.$projectId'
+import { Route as DashboardTeamSlugSettingsIndexRouteImport } from './routes/dashboard/$teamSlug.settings.index'
 import { Route as DashboardTeamSlugProjectIdIndexRouteImport } from './routes/dashboard/$teamSlug.$projectId.index'
+import { Route as DashboardTeamSlugSettingsPayoutsRouteImport } from './routes/dashboard/$teamSlug.settings.payouts'
+import { Route as DashboardTeamSlugProjectIdContractRouteImport } from './routes/dashboard/$teamSlug.$projectId.contract'
 import { Route as DashboardTeamSlugProjectIdVideoIdRouteImport } from './routes/dashboard/$teamSlug.$projectId.$videoId'
 
 const SignUpRoute = SignUpRouteImport.update({
@@ -102,6 +108,21 @@ const ForAgenciesRoute = ForAgenciesRouteImport.update({
   path: '/for/agencies',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DashboardTrashRoute = DashboardTrashRouteImport.update({
+  id: '/trash',
+  path: '/trash',
+  getParentRoute: () => DashboardRouteRoute,
+} as any)
+const DashboardSettingsRoute = DashboardSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => DashboardRouteRoute,
+} as any)
+const DashboardBillingRoute = DashboardBillingRouteImport.update({
+  id: '/billing',
+  path: '/billing',
+  getParentRoute: () => DashboardRouteRoute,
+} as any)
 const DashboardTeamSlugRoute = DashboardTeamSlugRouteImport.update({
   id: '/$teamSlug',
   path: '/$teamSlug',
@@ -134,10 +155,28 @@ const DashboardTeamSlugProjectIdRoute =
     path: '/$projectId',
     getParentRoute: () => DashboardTeamSlugRoute,
   } as any)
+const DashboardTeamSlugSettingsIndexRoute =
+  DashboardTeamSlugSettingsIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => DashboardTeamSlugSettingsRoute,
+  } as any)
 const DashboardTeamSlugProjectIdIndexRoute =
   DashboardTeamSlugProjectIdIndexRouteImport.update({
     id: '/',
     path: '/',
+    getParentRoute: () => DashboardTeamSlugProjectIdRoute,
+  } as any)
+const DashboardTeamSlugSettingsPayoutsRoute =
+  DashboardTeamSlugSettingsPayoutsRouteImport.update({
+    id: '/payouts',
+    path: '/payouts',
+    getParentRoute: () => DashboardTeamSlugSettingsRoute,
+  } as any)
+const DashboardTeamSlugProjectIdContractRoute =
+  DashboardTeamSlugProjectIdContractRouteImport.update({
+    id: '/contract',
+    path: '/contract',
     getParentRoute: () => DashboardTeamSlugProjectIdRoute,
   } as any)
 const DashboardTeamSlugProjectIdVideoIdRoute =
@@ -157,6 +196,9 @@ export interface FileRoutesByFullPath {
   '/compare/frameio': typeof CompareFrameioRoute
   '/compare/wipster': typeof CompareWipsterRoute
   '/dashboard/$teamSlug': typeof DashboardTeamSlugRouteWithChildren
+  '/dashboard/billing': typeof DashboardBillingRoute
+  '/dashboard/settings': typeof DashboardSettingsRoute
+  '/dashboard/trash': typeof DashboardTrashRoute
   '/for/agencies': typeof ForAgenciesRoute
   '/for/video-editors': typeof ForVideoEditorsRoute
   '/invite/$token': typeof InviteTokenRoute
@@ -166,10 +208,13 @@ export interface FileRoutesByFullPath {
   '/watch/$publicId': typeof WatchPublicIdRoute
   '/dashboard/': typeof DashboardIndexRoute
   '/dashboard/$teamSlug/$projectId': typeof DashboardTeamSlugProjectIdRouteWithChildren
-  '/dashboard/$teamSlug/settings': typeof DashboardTeamSlugSettingsRoute
+  '/dashboard/$teamSlug/settings': typeof DashboardTeamSlugSettingsRouteWithChildren
   '/dashboard/$teamSlug/': typeof DashboardTeamSlugIndexRoute
   '/dashboard/$teamSlug/$projectId/$videoId': typeof DashboardTeamSlugProjectIdVideoIdRoute
+  '/dashboard/$teamSlug/$projectId/contract': typeof DashboardTeamSlugProjectIdContractRoute
+  '/dashboard/$teamSlug/settings/payouts': typeof DashboardTeamSlugSettingsPayoutsRoute
   '/dashboard/$teamSlug/$projectId/': typeof DashboardTeamSlugProjectIdIndexRoute
+  '/dashboard/$teamSlug/settings/': typeof DashboardTeamSlugSettingsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -179,6 +224,9 @@ export interface FileRoutesByTo {
   '/sign-up': typeof SignUpRouteWithChildren
   '/compare/frameio': typeof CompareFrameioRoute
   '/compare/wipster': typeof CompareWipsterRoute
+  '/dashboard/billing': typeof DashboardBillingRoute
+  '/dashboard/settings': typeof DashboardSettingsRoute
+  '/dashboard/trash': typeof DashboardTrashRoute
   '/for/agencies': typeof ForAgenciesRoute
   '/for/video-editors': typeof ForVideoEditorsRoute
   '/invite/$token': typeof InviteTokenRoute
@@ -187,10 +235,12 @@ export interface FileRoutesByTo {
   '/sign-up/$': typeof SignUpSplatRoute
   '/watch/$publicId': typeof WatchPublicIdRoute
   '/dashboard': typeof DashboardIndexRoute
-  '/dashboard/$teamSlug/settings': typeof DashboardTeamSlugSettingsRoute
   '/dashboard/$teamSlug': typeof DashboardTeamSlugIndexRoute
   '/dashboard/$teamSlug/$projectId/$videoId': typeof DashboardTeamSlugProjectIdVideoIdRoute
+  '/dashboard/$teamSlug/$projectId/contract': typeof DashboardTeamSlugProjectIdContractRoute
+  '/dashboard/$teamSlug/settings/payouts': typeof DashboardTeamSlugSettingsPayoutsRoute
   '/dashboard/$teamSlug/$projectId': typeof DashboardTeamSlugProjectIdIndexRoute
+  '/dashboard/$teamSlug/settings': typeof DashboardTeamSlugSettingsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -203,6 +253,9 @@ export interface FileRoutesById {
   '/compare/frameio': typeof CompareFrameioRoute
   '/compare/wipster': typeof CompareWipsterRoute
   '/dashboard/$teamSlug': typeof DashboardTeamSlugRouteWithChildren
+  '/dashboard/billing': typeof DashboardBillingRoute
+  '/dashboard/settings': typeof DashboardSettingsRoute
+  '/dashboard/trash': typeof DashboardTrashRoute
   '/for/agencies': typeof ForAgenciesRoute
   '/for/video-editors': typeof ForVideoEditorsRoute
   '/invite/$token': typeof InviteTokenRoute
@@ -212,10 +265,13 @@ export interface FileRoutesById {
   '/watch/$publicId': typeof WatchPublicIdRoute
   '/dashboard/': typeof DashboardIndexRoute
   '/dashboard/$teamSlug/$projectId': typeof DashboardTeamSlugProjectIdRouteWithChildren
-  '/dashboard/$teamSlug/settings': typeof DashboardTeamSlugSettingsRoute
+  '/dashboard/$teamSlug/settings': typeof DashboardTeamSlugSettingsRouteWithChildren
   '/dashboard/$teamSlug/': typeof DashboardTeamSlugIndexRoute
   '/dashboard/$teamSlug/$projectId/$videoId': typeof DashboardTeamSlugProjectIdVideoIdRoute
+  '/dashboard/$teamSlug/$projectId/contract': typeof DashboardTeamSlugProjectIdContractRoute
+  '/dashboard/$teamSlug/settings/payouts': typeof DashboardTeamSlugSettingsPayoutsRoute
   '/dashboard/$teamSlug/$projectId/': typeof DashboardTeamSlugProjectIdIndexRoute
+  '/dashboard/$teamSlug/settings/': typeof DashboardTeamSlugSettingsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -229,6 +285,9 @@ export interface FileRouteTypes {
     | '/compare/frameio'
     | '/compare/wipster'
     | '/dashboard/$teamSlug'
+    | '/dashboard/billing'
+    | '/dashboard/settings'
+    | '/dashboard/trash'
     | '/for/agencies'
     | '/for/video-editors'
     | '/invite/$token'
@@ -241,7 +300,10 @@ export interface FileRouteTypes {
     | '/dashboard/$teamSlug/settings'
     | '/dashboard/$teamSlug/'
     | '/dashboard/$teamSlug/$projectId/$videoId'
+    | '/dashboard/$teamSlug/$projectId/contract'
+    | '/dashboard/$teamSlug/settings/payouts'
     | '/dashboard/$teamSlug/$projectId/'
+    | '/dashboard/$teamSlug/settings/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -251,6 +313,9 @@ export interface FileRouteTypes {
     | '/sign-up'
     | '/compare/frameio'
     | '/compare/wipster'
+    | '/dashboard/billing'
+    | '/dashboard/settings'
+    | '/dashboard/trash'
     | '/for/agencies'
     | '/for/video-editors'
     | '/invite/$token'
@@ -259,10 +324,12 @@ export interface FileRouteTypes {
     | '/sign-up/$'
     | '/watch/$publicId'
     | '/dashboard'
-    | '/dashboard/$teamSlug/settings'
     | '/dashboard/$teamSlug'
     | '/dashboard/$teamSlug/$projectId/$videoId'
+    | '/dashboard/$teamSlug/$projectId/contract'
+    | '/dashboard/$teamSlug/settings/payouts'
     | '/dashboard/$teamSlug/$projectId'
+    | '/dashboard/$teamSlug/settings'
   id:
     | '__root__'
     | '/'
@@ -274,6 +341,9 @@ export interface FileRouteTypes {
     | '/compare/frameio'
     | '/compare/wipster'
     | '/dashboard/$teamSlug'
+    | '/dashboard/billing'
+    | '/dashboard/settings'
+    | '/dashboard/trash'
     | '/for/agencies'
     | '/for/video-editors'
     | '/invite/$token'
@@ -286,7 +356,10 @@ export interface FileRouteTypes {
     | '/dashboard/$teamSlug/settings'
     | '/dashboard/$teamSlug/'
     | '/dashboard/$teamSlug/$projectId/$videoId'
+    | '/dashboard/$teamSlug/$projectId/contract'
+    | '/dashboard/$teamSlug/settings/payouts'
     | '/dashboard/$teamSlug/$projectId/'
+    | '/dashboard/$teamSlug/settings/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -405,6 +478,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ForAgenciesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/dashboard/trash': {
+      id: '/dashboard/trash'
+      path: '/trash'
+      fullPath: '/dashboard/trash'
+      preLoaderRoute: typeof DashboardTrashRouteImport
+      parentRoute: typeof DashboardRouteRoute
+    }
+    '/dashboard/settings': {
+      id: '/dashboard/settings'
+      path: '/settings'
+      fullPath: '/dashboard/settings'
+      preLoaderRoute: typeof DashboardSettingsRouteImport
+      parentRoute: typeof DashboardRouteRoute
+    }
+    '/dashboard/billing': {
+      id: '/dashboard/billing'
+      path: '/billing'
+      fullPath: '/dashboard/billing'
+      preLoaderRoute: typeof DashboardBillingRouteImport
+      parentRoute: typeof DashboardRouteRoute
+    }
     '/dashboard/$teamSlug': {
       id: '/dashboard/$teamSlug'
       path: '/$teamSlug'
@@ -447,11 +541,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardTeamSlugProjectIdRouteImport
       parentRoute: typeof DashboardTeamSlugRoute
     }
+    '/dashboard/$teamSlug/settings/': {
+      id: '/dashboard/$teamSlug/settings/'
+      path: '/'
+      fullPath: '/dashboard/$teamSlug/settings/'
+      preLoaderRoute: typeof DashboardTeamSlugSettingsIndexRouteImport
+      parentRoute: typeof DashboardTeamSlugSettingsRoute
+    }
     '/dashboard/$teamSlug/$projectId/': {
       id: '/dashboard/$teamSlug/$projectId/'
       path: '/'
       fullPath: '/dashboard/$teamSlug/$projectId/'
       preLoaderRoute: typeof DashboardTeamSlugProjectIdIndexRouteImport
+      parentRoute: typeof DashboardTeamSlugProjectIdRoute
+    }
+    '/dashboard/$teamSlug/settings/payouts': {
+      id: '/dashboard/$teamSlug/settings/payouts'
+      path: '/payouts'
+      fullPath: '/dashboard/$teamSlug/settings/payouts'
+      preLoaderRoute: typeof DashboardTeamSlugSettingsPayoutsRouteImport
+      parentRoute: typeof DashboardTeamSlugSettingsRoute
+    }
+    '/dashboard/$teamSlug/$projectId/contract': {
+      id: '/dashboard/$teamSlug/$projectId/contract'
+      path: '/contract'
+      fullPath: '/dashboard/$teamSlug/$projectId/contract'
+      preLoaderRoute: typeof DashboardTeamSlugProjectIdContractRouteImport
       parentRoute: typeof DashboardTeamSlugProjectIdRoute
     }
     '/dashboard/$teamSlug/$projectId/$videoId': {
@@ -466,6 +581,7 @@ declare module '@tanstack/react-router' {
 
 interface DashboardTeamSlugProjectIdRouteChildren {
   DashboardTeamSlugProjectIdVideoIdRoute: typeof DashboardTeamSlugProjectIdVideoIdRoute
+  DashboardTeamSlugProjectIdContractRoute: typeof DashboardTeamSlugProjectIdContractRoute
   DashboardTeamSlugProjectIdIndexRoute: typeof DashboardTeamSlugProjectIdIndexRoute
 }
 
@@ -473,6 +589,8 @@ const DashboardTeamSlugProjectIdRouteChildren: DashboardTeamSlugProjectIdRouteCh
   {
     DashboardTeamSlugProjectIdVideoIdRoute:
       DashboardTeamSlugProjectIdVideoIdRoute,
+    DashboardTeamSlugProjectIdContractRoute:
+      DashboardTeamSlugProjectIdContractRoute,
     DashboardTeamSlugProjectIdIndexRoute: DashboardTeamSlugProjectIdIndexRoute,
   }
 
@@ -481,15 +599,32 @@ const DashboardTeamSlugProjectIdRouteWithChildren =
     DashboardTeamSlugProjectIdRouteChildren,
   )
 
+interface DashboardTeamSlugSettingsRouteChildren {
+  DashboardTeamSlugSettingsPayoutsRoute: typeof DashboardTeamSlugSettingsPayoutsRoute
+  DashboardTeamSlugSettingsIndexRoute: typeof DashboardTeamSlugSettingsIndexRoute
+}
+
+const DashboardTeamSlugSettingsRouteChildren: DashboardTeamSlugSettingsRouteChildren =
+  {
+    DashboardTeamSlugSettingsPayoutsRoute:
+      DashboardTeamSlugSettingsPayoutsRoute,
+    DashboardTeamSlugSettingsIndexRoute: DashboardTeamSlugSettingsIndexRoute,
+  }
+
+const DashboardTeamSlugSettingsRouteWithChildren =
+  DashboardTeamSlugSettingsRoute._addFileChildren(
+    DashboardTeamSlugSettingsRouteChildren,
+  )
+
 interface DashboardTeamSlugRouteChildren {
   DashboardTeamSlugProjectIdRoute: typeof DashboardTeamSlugProjectIdRouteWithChildren
-  DashboardTeamSlugSettingsRoute: typeof DashboardTeamSlugSettingsRoute
+  DashboardTeamSlugSettingsRoute: typeof DashboardTeamSlugSettingsRouteWithChildren
   DashboardTeamSlugIndexRoute: typeof DashboardTeamSlugIndexRoute
 }
 
 const DashboardTeamSlugRouteChildren: DashboardTeamSlugRouteChildren = {
   DashboardTeamSlugProjectIdRoute: DashboardTeamSlugProjectIdRouteWithChildren,
-  DashboardTeamSlugSettingsRoute: DashboardTeamSlugSettingsRoute,
+  DashboardTeamSlugSettingsRoute: DashboardTeamSlugSettingsRouteWithChildren,
   DashboardTeamSlugIndexRoute: DashboardTeamSlugIndexRoute,
 }
 
@@ -498,11 +633,17 @@ const DashboardTeamSlugRouteWithChildren =
 
 interface DashboardRouteRouteChildren {
   DashboardTeamSlugRoute: typeof DashboardTeamSlugRouteWithChildren
+  DashboardBillingRoute: typeof DashboardBillingRoute
+  DashboardSettingsRoute: typeof DashboardSettingsRoute
+  DashboardTrashRoute: typeof DashboardTrashRoute
   DashboardIndexRoute: typeof DashboardIndexRoute
 }
 
 const DashboardRouteRouteChildren: DashboardRouteRouteChildren = {
   DashboardTeamSlugRoute: DashboardTeamSlugRouteWithChildren,
+  DashboardBillingRoute: DashboardBillingRoute,
+  DashboardSettingsRoute: DashboardSettingsRoute,
+  DashboardTrashRoute: DashboardTrashRoute,
   DashboardIndexRoute: DashboardIndexRoute,
 }
 

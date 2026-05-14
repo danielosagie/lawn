@@ -2,43 +2,43 @@ import { Link } from "@tanstack/react-router";
 import { MarketingLayout } from "@/components/MarketingLayout";
 
 const WIPSTER_PRICE_PER_USER = 15;
-const LAWN_PRICE_FLAT = 5;
+const SNIP_PRICE_FLAT = 5;
 
 const comparisonRows = [
   {
     feature: "Pricing",
     wipster: "Per-user/month",
-    lawn: "$5/month. Total.",
+    snip: "$5/month. Total.",
     note: "Your accountant will love you.",
   },
   {
     feature: "Open source",
     wipster: "No",
-    lawn: "Yes",
+    snip: "Yes",
     note: "You can literally read our code.",
   },
   {
     feature: "Speed",
     wipster: "Solid, no complaints",
-    lawn: "Instant Mux playback",
+    snip: "Instant Mux playback",
     note: "We're unreasonably competitive about this.",
   },
   {
     feature: "Sharing",
     wipster: "Invite to workspace",
-    lawn: "Just a link",
+    snip: "Just a link",
     note: "Your clients don't want another login.",
   },
   {
     feature: "Simplicity",
     wipster: "Full-featured platform",
-    lawn: "Fewer features (on purpose)",
+    snip: "Fewer features (on purpose)",
     note: "We call this a feature, not a bug.",
   },
   {
     feature: "Approvals",
     wipster: "Built-in workflows",
-    lawn: "Comments + thumbs up",
+    snip: "Comments + thumbs up",
     note: "If that's not enough, we respect that.",
   },
 ];
@@ -46,7 +46,7 @@ const comparisonRows = [
 const teamSizes = [3, 5, 10, 25];
 
 function annualSavings(teamSize: number) {
-  return (WIPSTER_PRICE_PER_USER * teamSize - LAWN_PRICE_FLAT) * 12;
+  return (WIPSTER_PRICE_PER_USER * teamSize - SNIP_PRICE_FLAT) * 12;
 }
 
 const savingsCommentary: Record<number, string> = {
@@ -63,7 +63,7 @@ export default function CompareWipster() {
       <section className="px-6 pt-20 pb-24 md:pt-28 md:pb-32 border-b-2 border-[var(--border)] bg-[var(--background)]">
         <div className="max-w-5xl mx-auto">
           <h1 className="text-[14vw] sm:text-[10vw] md:text-[8vw] font-black leading-[0.85] tracking-tighter uppercase">
-            lawn vs
+            snip vs
             <br />
             Wipster
           </h1>
@@ -79,7 +79,7 @@ export default function CompareWipster() {
             </p>
             <p className="mt-6 text-lg text-[var(--foreground-muted)] font-medium max-w-lg">
               Wipster is a solid tool with real approval workflows and a proper
-              feature set. lawn is smaller, cheaper, and open source. We do less
+              feature set. snip is smaller, cheaper, and open source. We do less
               for less money, and that's the whole pitch.
             </p>
           </div>
@@ -105,7 +105,7 @@ export default function CompareWipster() {
                 Wipster
               </div>
               <div className="p-4 md:p-6 font-black uppercase tracking-wider text-sm border-l-2 border-[var(--border)] text-[var(--accent-light)]">
-                lawn
+                snip
               </div>
             </div>
 
@@ -127,7 +127,7 @@ export default function CompareWipster() {
                   {row.wipster}
                 </div>
                 <div className="p-4 md:p-6 border-l-2 border-[var(--border)] flex items-center font-bold text-[var(--accent)]">
-                  {row.lawn}
+                  {row.snip}
                 </div>
               </div>
             ))}
@@ -149,7 +149,7 @@ export default function CompareWipster() {
             MATH.
           </h2>
           <p className="text-center text-lg text-[var(--foreground-muted)] font-medium mb-16 max-w-lg mx-auto">
-            Wipster charges per user. lawn charges $5 per month total. Not per
+            Wipster charges per user. snip charges $5 per month total. Not per
             user. Just $5. The math gets increasingly silly as your team grows.
           </p>
 
@@ -157,7 +157,7 @@ export default function CompareWipster() {
             {teamSizes.map((size) => {
               const savings = annualSavings(size);
               const wipsterAnnual = WIPSTER_PRICE_PER_USER * size * 12;
-              const lawnAnnual = LAWN_PRICE_FLAT * 12;
+              const snipAnnual = SNIP_PRICE_FLAT * 12;
 
               return (
                 <div
@@ -181,10 +181,10 @@ export default function CompareWipster() {
                     </div>
                     <div className="flex justify-between items-baseline mb-4">
                       <span className="text-xs font-bold uppercase tracking-wider text-[var(--accent)]">
-                        lawn
+                        snip
                       </span>
                       <span className="font-black text-[var(--accent)]">
-                        ${lawnAnnual}/yr
+                        ${snipAnnual}/yr
                       </span>
                     </div>
                     <div className="border-t-2 border-[var(--border-subtle)] pt-4 mt-auto">
@@ -213,7 +213,7 @@ export default function CompareWipster() {
               You can literally read our code.
             </p>
             <p className="text-base font-medium opacity-90 max-w-2xl">
-              lawn is fully open source. Every line. The elegant parts and the
+              snip is fully open source. Every line. The elegant parts and the
               parts where we left a TODO from three months ago. No black box. No
               trust required. Just code you can read, fork, and judge silently.
             </p>
@@ -297,11 +297,11 @@ export default function CompareWipster() {
               </div>
             </div>
 
-            {/* Use lawn if... */}
+            {/* Use snip if... */}
             <div className="border-2 border-[var(--border)] bg-[var(--surface-strong)] text-[var(--foreground-inverse)] shadow-[8px_8px_0px_0px_var(--shadow-accent)]">
               <div className="border-b-2 border-[var(--border)] p-6">
                 <h3 className="text-2xl md:text-3xl font-black uppercase tracking-tighter text-[var(--accent-light)]">
-                  Use lawn if...
+                  Use snip if...
                 </h3>
               </div>
               <div className="p-6">

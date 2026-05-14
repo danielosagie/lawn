@@ -2,7 +2,7 @@ import { MINUTE, RateLimiter } from "@convex-dev/rate-limiter";
 import { v } from "convex/values";
 import { components } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
-import { mutation, query, MutationCtx } from "./_generated/server";
+import { internalQuery, mutation, query, MutationCtx } from "./_generated/server";
 import { identityName, requireVideoAccess } from "./auth";
 import { generateUniqueToken, hashPassword, verifyPassword } from "./security";
 import { findShareLinkByToken, issueShareAccessGrant } from "./shareAccess";
@@ -81,12 +81,45 @@ async function deleteShareAccessGrantsForLink(
   }
 }
 
+function sanitizeCurrency(code: string | undefined): string {
+  if (!code) return "usd";
+  const cleaned = code.trim().toLowerCase();
+  return cleaned.length >= 3 && cleaned.length <= 5 ? cleaned : "usd";
+}
+
+function sanitizePaywallInput(
+  paywall:
+    | { priceCents: number; currency?: string; description?: string }
+    | undefined,
+):
+  | { priceCents: number; currency: string; description?: string }
+  | undefined {
+  if (!paywall) return undefined;
+  if (!Number.isFinite(paywall.priceCents) || paywall.priceCents < 50) {
+    throw new Error("Paywall price must be at least 50 cents.");
+  }
+  return {
+    priceCents: Math.floor(paywall.priceCents),
+    currency: sanitizeCurrency(paywall.currency),
+    description: paywall.description?.trim() || undefined,
+  };
+}
+
 export const create = mutation({
   args: {
     videoId: v.id("videos"),
     expiresInDays: v.optional(v.number()),
     allowDownload: v.optional(v.boolean()),
     password: v.optional(v.string()),
+    paywall: v.optional(
+      v.object({
+        priceCents: v.number(),
+        currency: v.optional(v.string()),
+        description: v.optional(v.string()),
+      }),
+    ),
+    clientLabel: v.optional(v.string()),
+    clientEmail: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { user } = await requireVideoAccess(ctx, args.videoId, "member");
@@ -99,6 +132,7 @@ export const create = mutation({
     const passwordHash = normalizedPassword
       ? await hashPassword(normalizedPassword)
       : undefined;
+    const paywall = sanitizePaywallInput(args.paywall);
 
     await ctx.db.insert("shareLinks", {
       videoId: args.videoId,
@@ -112,6 +146,9 @@ export const create = mutation({
       failedAccessAttempts: 0,
       lockedUntil: undefined,
       viewCount: 0,
+      paywall,
+      clientLabel: args.clientLabel?.trim() || undefined,
+      clientEmail: args.clientEmail?.trim() || undefined,
     });
 
     return { token };
@@ -141,6 +178,9 @@ export const list = query({
       hasPassword: hasPasswordProtection(link),
       creatorName: link.createdByName,
       isExpired: link.expiresAt ? link.expiresAt < Date.now() : false,
+      paywall: link.paywall ?? null,
+      clientLabel: link.clientLabel ?? null,
+      clientEmail: link.clientEmail ?? null,
     }));
 
     return linksWithCreator;
@@ -157,6 +197,23 @@ export const remove = mutation({
 
     await deleteShareAccessGrantsForLink(ctx, args.linkId);
     await ctx.db.delete(args.linkId);
+  },
+});
+
+/** Internal lookup used by background actions (preview-asset prep). */
+export const getInternal = internalQuery({
+  args: { shareLinkId: v.id("shareLinks") },
+  handler: async (ctx, args) => {
+    const link = await ctx.db.get(args.shareLinkId);
+    if (!link) return null;
+    return {
+      _id: link._id,
+      videoId: link.videoId,
+      token: link.token,
+      paywall: link.paywall ?? null,
+      clientEmail: link.clientEmail ?? null,
+      clientLabel: link.clientLabel ?? null,
+    };
   },
 });
 

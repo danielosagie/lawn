@@ -6,13 +6,13 @@ const painPoints = [
     id: "01",
     title: "CLIENTS DON'T KNOW TIMECODES",
     description:
-      'Your client says "around the middle somewhere, you know, after the thing." With lawn, they click on the video and their comment lands on that exact frame. No timecode math. No guessing.',
+      'Your client says "around the middle somewhere, you know, after the thing." With snip, they click on the video and their comment lands on that exact frame. No timecode math. No guessing.',
   },
   {
     id: "02",
     title: "UPLOAD, WAIT, TRANSCODE, WAIT",
     description:
-      "You just exported a 12GB ProRes and now you need to wait 20 minutes for it to process. lawn uses Mux-powered playback — upload your file, get a link, share it. Seconds, not minutes.",
+      "You just exported a 12GB ProRes and now you need to wait 20 minutes for it to process. snip uses Mux-powered playback — upload your file, get a link, share it. Seconds, not minutes.",
   },
   {
     id: "03",
@@ -24,7 +24,7 @@ const painPoints = [
     id: "04",
     title: "10 REVIEWERS = 10 SEATS = $$$",
     description:
-      "The director, the producer, the client, the client's wife, the intern who somehow has opinions — they all need access. lawn is $5/month flat. Invite literally everyone.",
+      "The director, the producer, the client, the client's wife, the intern who somehow has opinions — they all need access. snip is $5/month flat. Invite literally everyone.",
   },
 ];
 
@@ -63,14 +63,14 @@ export default function ForVideoEditors() {
           </h1>
           <p className="text-xl md:text-2xl font-medium text-[#888] max-w-3xl mb-12">
             Your client said "make it pop" on a 47-minute timeline. You deserve
-            a review tool that at least tells you where they meant. lawn gives
+            a review tool that at least tells you where they meant. snip gives
             you frame-accurate feedback, instant playback, and a workflow that
             doesn't fight your NLE.
           </p>
           <div className="flex flex-col sm:flex-row gap-4">
             <Link
               to="/sign-up"
-              className="bg-[#1a1a1a] text-[#f0f0e8] px-8 py-4 border-2 border-[#1a1a1a] font-black text-lg uppercase tracking-wider hover:bg-[#2d5a2d] transition-colors shadow-[6px_6px_0px_0px_var(--shadow-color)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[4px_4px_0px_0px_var(--shadow-color)] text-center"
+              className="bg-[#1a1a1a] text-[#f0f0e8] px-8 py-4 border-2 border-[#1a1a1a] font-black text-lg uppercase tracking-wider hover:bg-[#FF6600] transition-colors shadow-[6px_6px_0px_0px_var(--shadow-color)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[4px_4px_0px_0px_var(--shadow-color)] text-center"
             >
               START FREE TRIAL
             </Link>
@@ -91,7 +91,7 @@ export default function ForVideoEditors() {
             THE PAIN IS REAL.
           </h2>
           <p className="text-lg text-[#888] font-medium text-center mb-16 max-w-2xl mx-auto">
-            Every editor knows these problems. We built lawn to fix them.
+            Every editor knows these problems. We built snip to fix them.
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -104,7 +104,7 @@ export default function ForVideoEditors() {
                   <span className="text-sm font-black text-[#888]">
                     /{point.id}
                   </span>
-                  <span className="text-sm font-bold text-[#2d5a2d] uppercase tracking-wider">
+                  <span className="text-sm font-bold text-[#FF6600] uppercase tracking-wider">
                     SOLVED
                   </span>
                 </div>
@@ -148,7 +148,7 @@ export default function ForVideoEditors() {
                   </span>
                 </div>
                 <div className="p-8 flex-grow flex flex-col">
-                  <h3 className="text-2xl md:text-3xl font-black uppercase tracking-tighter mb-4 text-[#2d5a2d]">
+                  <h3 className="text-2xl md:text-3xl font-black uppercase tracking-tighter mb-4 text-[#FF6600]">
                     {item.action}
                   </h3>
                   <p className="text-base font-medium text-[#1a1a1a] leading-relaxed">
@@ -162,12 +162,12 @@ export default function ForVideoEditors() {
       </section>
 
       {/* Pricing Callout */}
-      <section className="px-6 py-24 md:py-32 border-b-2 border-[#1a1a1a] bg-[#2d5a2d] text-[#f0f0e8]">
+      <section className="px-6 py-24 md:py-32 border-b-2 border-[#1a1a1a] bg-[#FF6600] text-[#f0f0e8]">
         <div className="max-w-5xl mx-auto text-center">
           <h2 className="text-6xl md:text-8xl lg:text-9xl font-black uppercase tracking-tighter leading-[0.85] mb-8">
             $5/MONTH.
             <br />
-            <span className="text-[#7cb87c]">NOT PER USER.</span>
+            <span className="text-[#FFB380]">NOT PER USER.</span>
             <br />
             TOTAL.
           </h2>
@@ -176,7 +176,7 @@ export default function ForVideoEditors() {
             entire team, your clients, your client's clients — everyone gets
             access for one flat price.
           </p>
-          <p className="text-lg font-bold text-[#7cb87c]">
+          <p className="text-lg font-bold text-[#FFB380]">
             Stop paying per-seat tax on collaboration.
           </p>
         </div>
@@ -194,7 +194,7 @@ export default function ForVideoEditors() {
           </p>
           <Link
             to="/sign-up"
-            className="bg-[#1a1a1a] text-[#f0f0e8] px-12 py-6 border-2 border-[#1a1a1a] text-2xl font-black uppercase tracking-wider hover:bg-[#2d5a2d] hover:border-[#2d5a2d] transition-colors shadow-[12px_12px_0px_0px_var(--shadow-accent)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[8px_8px_0px_0px_var(--shadow-accent)]"
+            className="bg-[#1a1a1a] text-[#f0f0e8] px-12 py-6 border-2 border-[#1a1a1a] text-2xl font-black uppercase tracking-wider hover:bg-[#FF6600] hover:border-[#FF6600] transition-colors shadow-[12px_12px_0px_0px_var(--shadow-accent)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[8px_8px_0px_0px_var(--shadow-accent)]"
           >
             START FREE TRIAL
           </Link>

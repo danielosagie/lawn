@@ -18,7 +18,7 @@ export function MarketingNav() {
     >
       <div className="flex items-center gap-4">
         <Link to="/" className="text-xl font-black tracking-tighter">
-          lawn.
+          snip.
         </Link>
       </div>
       <div className="flex gap-6 items-center text-sm font-bold uppercase tracking-wide">

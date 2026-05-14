@@ -78,12 +78,12 @@
   --border: #1a1a1a;
   --border-subtle: #cccccc;
   --shadow-color: #1a1a1a;
-  --shadow-accent: rgba(45,90,45,1);
+  --shadow-accent: #FF6600;
 
-  /* Accent - forest green */
-  --accent: #2d5a2d;
-  --accent-hover: #3a6a3a;
-  --accent-light: #7cb87c;
+  /* Accent — brand orange */
+  --accent: #FF6600;
+  --accent-hover: #FF7A1F;
+  --accent-light: #FFB380;
 
   /* Semantic colors */
   --destructive: #dc2626;
@@ -116,13 +116,15 @@
   /* Borders */
   --border: #e7ede4;
   --border-subtle: #374038;
-  --shadow-color: #7cb87c;
-  --shadow-accent: #7cb87c;
+  --shadow-color: #FF6600;
+  --shadow-accent: #FF6600;
 
-  /* Accent - forest green lifted for dark backgrounds */
-  --accent: #7cb87c;
-  --accent-hover: #91c991;
-  --accent-light: #b8ddb8;
+  /* Accent — same vivid orange in both themes so the brand
+     reads consistently. The light wash gets lifted a touch so
+     it still works as a hover/highlight cell on dark surfaces. */
+  --accent: #FF6600;
+  --accent-hover: #FF7A1F;
+  --accent-light: #FFB380;
 
   /* Semantic colors */
   --destructive: #f87171;
@@ -154,13 +156,13 @@
     /* Borders */
     --border: #e7ede4;
     --border-subtle: #374038;
-    --shadow-color: #7cb87c;
-    --shadow-accent: #7cb87c;
+    --shadow-color: #FF6600;
+    --shadow-accent: #FF6600;
 
-    /* Accent - forest green lifted for dark backgrounds */
-    --accent: #7cb87c;
-    --accent-hover: #91c991;
-    --accent-light: #b8ddb8;
+    /* Accent — same vivid orange in both themes. */
+    --accent: #FF6600;
+    --accent-hover: #FF7A1F;
+    --accent-light: #FFB380;
 
     /* Semantic colors */
     --destructive: #f87171;
@@ -388,14 +390,14 @@ body {
 [class~="text-[#cccccc]"] { color: var(--border-subtle) !important; }
 [class~="border-[#cccccc]"] { border-color: var(--border-subtle) !important; }
 
-[class~="bg-[#2d5a2d]"] { background-color: var(--accent) !important; }
-[class~="text-[#2d5a2d]"] { color: var(--accent) !important; }
-[class~="border-[#2d5a2d]"] { border-color: var(--accent) !important; }
+[class~="bg-[#FF6600]"] { background-color: var(--accent) !important; }
+[class~="text-[#FF6600]"] { color: var(--accent) !important; }
+[class~="border-[#FF6600]"] { border-color: var(--accent) !important; }
 
-[class~="bg-[#3a6a3a]"] { background-color: var(--accent-hover) !important; }
-[class~="text-[#7cb87c]"] { color: var(--accent-light) !important; }
-[class~="bg-[#7cb87c]"] { background-color: var(--accent-light) !important; }
-[class~="border-[#7cb87c]"] { border-color: var(--accent-light) !important; }
+[class~="bg-[#FF7A1F]"] { background-color: var(--accent-hover) !important; }
+[class~="text-[#FFB380]"] { color: var(--accent-light) !important; }
+[class~="bg-[#FFB380]"] { background-color: var(--accent-light) !important; }
+[class~="border-[#FFB380]"] { border-color: var(--accent-light) !important; }
 
 [class~="text-[#dc2626]"] { color: var(--destructive) !important; }
 [class~="bg-[#dc2626]"] { background-color: var(--destructive) !important; }
@@ -414,14 +416,14 @@ body {
 [class~="hover:bg-[#1a1a1a]"]:hover { background-color: var(--foreground) !important; }
 [class~="hover:bg-[#e8e8e0]"]:hover { background-color: var(--surface-alt) !important; }
 [class~="hover:bg-[#d8d8d0]"]:hover { background-color: var(--surface-muted) !important; }
-[class~="hover:bg-[#3a6a3a]"]:hover { background-color: var(--accent-hover) !important; }
+[class~="hover:bg-[#FF7A1F]"]:hover { background-color: var(--accent-hover) !important; }
 [class~="hover:bg-[#dc2626]/10"]:hover {
   background-color: color-mix(in srgb, var(--destructive) 10%, transparent) !important;
 }
 
 [class~="hover:text-[#1a1a1a]"]:hover { color: var(--foreground) !important; }
 [class~="hover:text-[#f0f0e8]"]:hover { color: var(--foreground-inverse) !important; }
-[class~="hover:text-[#2d5a2d]"]:hover { color: var(--accent) !important; }
+[class~="hover:text-[#FF6600]"]:hover { color: var(--accent) !important; }
 [class~="group-hover:text-[#1a1a1a]"] {
   transition: color 150ms ease;
 }

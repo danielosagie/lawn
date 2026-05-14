@@ -34,7 +34,6 @@ export function UploadButton({
       <input
         ref={inputRef}
         type="file"
-        accept="video/*"
         multiple
         onChange={handleChange}
         className="hidden"
@@ -43,7 +42,7 @@ export function UploadButton({
         {children || (
           <>
             <Plus className="mr-1.5 h-4 w-4" />
-            Upload
+            Add files
           </>
         )}
       </Button>

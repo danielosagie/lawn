@@ -66,14 +66,14 @@ function getPreferredPlaybackId(playbackIds: MuxData["playback_ids"]): string | 
 async function resolveVideoIdFromMuxRefs(
   ctx: ActionCtx,
   data: MuxData,
-): Promise<Id<"videos"> | null> {
+): Promise<{ videoId: Id<"videos">; isPreview: boolean } | null> {
   const uploadId = asString(data.upload_id);
   if (uploadId) {
     const fromUpload = (await ctx.runQuery(internal.videos.getVideoByMuxUploadId, {
       muxUploadId: uploadId,
     })) as { videoId?: Id<"videos"> } | null;
     if (fromUpload?.videoId) {
-      return fromUpload.videoId;
+      return { videoId: fromUpload.videoId, isPreview: false };
     }
   }
 
@@ -83,13 +83,25 @@ async function resolveVideoIdFromMuxRefs(
       muxAssetId: assetId,
     })) as { videoId?: Id<"videos"> } | null;
     if (fromAsset?.videoId) {
-      return fromAsset.videoId;
+      return { videoId: fromAsset.videoId, isPreview: false };
+    }
+    const fromPreview = (await ctx.runQuery(
+      internal.videos.getVideoByMuxPreviewAssetId,
+      { muxPreviewAssetId: assetId },
+    )) as { videoId?: Id<"videos"> } | null;
+    if (fromPreview?.videoId) {
+      return { videoId: fromPreview.videoId, isPreview: true };
     }
   }
 
   const passthrough = asString(data.passthrough);
   if (passthrough) {
-    return passthrough as Id<"videos">;
+    // Preview assets pass `${videoId}:preview` as passthrough.
+    if (passthrough.endsWith(":preview")) {
+      const id = passthrough.slice(0, -":preview".length);
+      return { videoId: id as Id<"videos">, isPreview: true };
+    }
+    return { videoId: passthrough as Id<"videos">, isPreview: false };
   }
 
   return null;
@@ -145,13 +157,12 @@ export const processWebhook = internalAction({
             break;
           }
 
-          const videoId =
-            (await resolveVideoIdFromMuxRefs(ctx, {
-              ...data,
-              asset_id: assetId,
-            })) ?? null;
+          const resolved = await resolveVideoIdFromMuxRefs(ctx, {
+            ...data,
+            asset_id: assetId,
+          });
 
-          if (!videoId) {
+          if (!resolved) {
             console.error("Could not resolve video for Mux asset.created", {
               eventType,
               ...eventSummary,
@@ -159,13 +170,24 @@ export const processWebhook = internalAction({
             break;
           }
 
+          // Preview assets don't go through setMuxAssetReference — the asset
+          // ID is recorded by ensurePreviewAssetForShareLink before ingest,
+          // so the asset.ready handler is the one that matters there.
+          if (resolved.isPreview) {
+            console.log("Skipping setMuxAssetReference for preview asset", {
+              videoId: resolved.videoId,
+              assetId,
+            });
+            break;
+          }
+
           await ctx.runMutation(internal.videos.setMuxAssetReference, {
-            videoId,
+            videoId: resolved.videoId,
             muxAssetId: assetId,
           });
           console.log("Mapped Mux asset to video", {
             eventType,
-            videoId,
+            videoId: resolved.videoId,
             assetId,
           });
           break;
@@ -203,15 +225,14 @@ export const processWebhook = internalAction({
             break;
           }
 
-          const videoId =
-            (await resolveVideoIdFromMuxRefs(ctx, {
-              ...data,
-              asset_id: assetId,
-              upload_id: asString(data.upload_id),
-              passthrough: resolvedPassthrough,
-            })) ?? null;
+          const resolved = await resolveVideoIdFromMuxRefs(ctx, {
+            ...data,
+            asset_id: assetId,
+            upload_id: asString(data.upload_id),
+            passthrough: resolvedPassthrough,
+          });
 
-          if (!videoId) {
+          if (!resolved) {
             console.error("Could not resolve video for Mux asset.ready", {
               eventType,
               assetId,
@@ -221,8 +242,26 @@ export const processWebhook = internalAction({
             break;
           }
 
+          if (resolved.isPreview) {
+            // Preview asset is ready — store its (signed) playback ID. The
+            // full asset's status is already "ready" from its earlier event.
+            const signedPlaybackId = (data.playback_ids ?? []).find(
+              (entry) => entry.policy === "signed" && entry.id,
+            )?.id ?? playbackId;
+            await ctx.runMutation(internal.videos.setMuxPreviewPlaybackId, {
+              videoId: resolved.videoId,
+              muxPreviewPlaybackId: signedPlaybackId,
+            });
+            console.log("Preview asset ready", {
+              videoId: resolved.videoId,
+              assetId,
+              signedPlaybackId,
+            });
+            break;
+          }
+
           await ctx.runMutation(internal.videos.markAsReady, {
-            videoId,
+            videoId: resolved.videoId,
             muxAssetId: assetId,
             muxPlaybackId: playbackId,
             duration,
@@ -230,7 +269,7 @@ export const processWebhook = internalAction({
           });
           console.log("Marked video ready from Mux webhook", {
             eventType,
-            videoId,
+            videoId: resolved.videoId,
             assetId,
             playbackId,
           });
@@ -240,12 +279,12 @@ export const processWebhook = internalAction({
 
         case "video.asset.errored": {
           const assetId = asString(data.id) ?? asString(data.asset_id);
-          const videoId = await resolveVideoIdFromMuxRefs(ctx, {
+          const resolved = await resolveVideoIdFromMuxRefs(ctx, {
             ...data,
             asset_id: assetId,
           });
 
-          if (!videoId) {
+          if (!resolved) {
             console.error("Could not resolve video for Mux asset.errored", {
               eventType,
               ...eventSummary,
@@ -254,15 +293,22 @@ export const processWebhook = internalAction({
             break;
           }
 
-          const errorMessage = getErrorMessage(data) ?? "Mux failed to process this asset.";
+          const errorMessage =
+            getErrorMessage(data) ?? "Mux failed to process this asset.";
           console.error("Marking video failed from Mux asset.errored", {
             eventType,
-            videoId,
+            videoId: resolved.videoId,
             assetId,
             errorMessage,
+            isPreview: resolved.isPreview,
           });
+          // For a failed preview, don't poison the main video — the original
+          // playback path still works, just the paywalled preview is broken.
+          if (resolved.isPreview) {
+            break;
+          }
           await ctx.runMutation(internal.videos.markAsFailed, {
-            videoId,
+            videoId: resolved.videoId,
             uploadError: errorMessage,
           });
           break;
@@ -281,12 +327,12 @@ export const processWebhook = internalAction({
         case "video.upload.cancelled":
         case "video.upload.errored": {
           const uploadId = asString(data.id) ?? asString(data.upload_id);
-          const videoId = await resolveVideoIdFromMuxRefs(ctx, {
+          const resolved = await resolveVideoIdFromMuxRefs(ctx, {
             ...data,
             upload_id: uploadId,
           });
 
-          if (!videoId) {
+          if (!resolved) {
             console.error("Could not resolve video for Mux upload failure", {
               eventType,
               ...eventSummary,
@@ -295,15 +341,16 @@ export const processWebhook = internalAction({
             break;
           }
 
-          const errorMessage = getErrorMessage(data) ?? "Mux upload failed or was cancelled.";
+          const errorMessage =
+            getErrorMessage(data) ?? "Mux upload failed or was cancelled.";
           console.error("Marking video failed from Mux upload failure", {
             eventType,
-            videoId,
+            videoId: resolved.videoId,
             uploadId,
             errorMessage,
           });
           await ctx.runMutation(internal.videos.markAsFailed, {
-            videoId,
+            videoId: resolved.videoId,
             uploadError: errorMessage,
           });
           break;

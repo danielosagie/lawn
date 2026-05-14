@@ -6,7 +6,7 @@ const painPoints = [
     id: "01",
     title: "ADDING A FREELANCER SHOULDN'T COST $19/MO",
     description:
-      'You hired them for a two-week project. Why are you paying a monthly seat fee? lawn is $5/month total. Unlimited seats. Add your whole roster — full-timers, freelancers, that one intern who\'s "really good at Premiere."',
+      'You hired them for a two-week project. Why are you paying a monthly seat fee? snip is $5/month total. Unlimited seats. Add your whole roster — full-timers, freelancers, that one intern who\'s "really good at Premiere."',
   },
   {
     id: "02",
@@ -32,21 +32,21 @@ const comparisons = [
   {
     size: "5-PERSON TEAM",
     competitor: "$95",
-    lawn: "$5",
+    snip: "$5",
     saved: "$1,080",
     commentary: "That's a lot of coffee.",
   },
   {
     size: "10-PERSON TEAM",
     competitor: "$190",
-    lawn: "$5",
+    snip: "$5",
     saved: "$2,220",
     commentary: "A nice camera lens, actually.",
   },
   {
     size: "15 + FREELANCERS",
     competitor: "$285+",
-    lawn: "$5",
+    snip: "$5",
     saved: "$3,360+",
     commentary: "Almost enough for one more freelancer.",
   },
@@ -68,7 +68,7 @@ export default function ForAgencies() {
             <br />
             PER SEAT.
             <br />
-            <span className="text-[#2d5a2d]">START SHIPPING</span>
+            <span className="text-[#FF6600]">START SHIPPING</span>
             <br />
             WORK.
           </h1>
@@ -79,14 +79,14 @@ export default function ForAgencies() {
               more.
             </p>
             <p className="text-lg text-[#888] font-medium mt-4">
-              lawn is video review for creative teams. Unlimited seats. $5/month.
+              snip is video review for creative teams. Unlimited seats. $5/month.
               The whole agency, not per editor.
             </p>
           </div>
           <div className="mt-12 flex flex-col sm:flex-row gap-4">
             <Link
               to="/sign-up"
-              className="bg-[#1a1a1a] text-[#f0f0e8] px-8 py-5 border-2 border-[#1a1a1a] font-black text-lg uppercase tracking-wider hover:bg-[#2d5a2d] transition-colors shadow-[8px_8px_0px_0px_var(--shadow-color)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[4px_4px_0px_0px_var(--shadow-color)] text-center"
+              className="bg-[#1a1a1a] text-[#f0f0e8] px-8 py-5 border-2 border-[#1a1a1a] font-black text-lg uppercase tracking-wider hover:bg-[#FF6600] transition-colors shadow-[8px_8px_0px_0px_var(--shadow-color)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[4px_4px_0px_0px_var(--shadow-color)] text-center"
             >
               START YOUR TEAM
             </Link>
@@ -122,7 +122,7 @@ export default function ForAgencies() {
                 className="bg-[#f0f0e8] border-2 border-[#1a1a1a] shadow-[8px_8px_0px_0px_var(--shadow-color)] flex flex-col hover:-translate-y-1 hover:translate-x-1 hover:shadow-[4px_4px_0px_0px_var(--shadow-color)] transition-all"
               >
                 <div className="border-b-2 border-[#1a1a1a] px-6 py-4 flex items-center gap-4 bg-[#1a1a1a] text-[#f0f0e8]">
-                  <span className="text-sm font-black text-[#7cb87c]">
+                  <span className="text-sm font-black text-[#FFB380]">
                     /{point.id}
                   </span>
                 </div>
@@ -151,7 +151,7 @@ export default function ForAgencies() {
                 MATH.
               </h2>
               <p className="text-xl text-[#888] font-medium max-w-sm">
-                Frame.io charges $19/user/month. lawn charges $5/month total.
+                Frame.io charges $19/user/month. snip charges $5/month total.
                 Here's what that looks like at agency scale.
               </p>
             </div>
@@ -165,7 +165,7 @@ export default function ForAgencies() {
                   <div className="flex flex-col md:flex-row">
                     {/* Team size label */}
                     <div className="bg-[#1a1a1a] text-[#f0f0e8] p-6 md:p-8 md:w-1/3 flex flex-col justify-center border-b-2 md:border-b-0 md:border-r-2 border-[#1a1a1a]">
-                      <span className="text-xs font-bold tracking-widest text-[#7cb87c] mb-1">
+                      <span className="text-xs font-bold tracking-widest text-[#FFB380] mb-1">
                         TEAM SIZE
                       </span>
                       <span className="text-2xl md:text-3xl font-black uppercase tracking-tight leading-none">
@@ -190,8 +190,8 @@ export default function ForAgencies() {
                         <span className="text-xs font-bold tracking-widest text-[#888] block mb-1">
                           LAWN
                         </span>
-                        <span className="text-3xl font-black text-[#2d5a2d]">
-                          {row.lawn}
+                        <span className="text-3xl font-black text-[#FF6600]">
+                          {row.snip}
                         </span>
                         <span className="text-sm text-[#888] font-bold">
                           /mo
@@ -201,7 +201,7 @@ export default function ForAgencies() {
                         <span className="text-xs font-bold tracking-widest text-[#888] block mb-1">
                           YOU SAVE / YEAR
                         </span>
-                        <span className="text-3xl font-black text-[#2d5a2d]">
+                        <span className="text-3xl font-black text-[#FF6600]">
                           {row.saved}
                         </span>
                         <p className="text-sm font-bold text-[#888] mt-2">
@@ -215,7 +215,7 @@ export default function ForAgencies() {
 
               <div className="border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] p-6 md:p-8">
                 <p className="text-lg font-bold">
-                  <span className="text-[#7cb87c]">The pattern:</span> They
+                  <span className="text-[#FFB380]">The pattern:</span> They
                   charge more as you grow. We don't. Your 50th seat costs the
                   same as your first — $0 extra.
                 </p>
@@ -226,7 +226,7 @@ export default function ForAgencies() {
       </section>
 
       {/* CTA */}
-      <section className="px-6 py-32 bg-[#2d5a2d] text-[#f0f0e8] border-b-2 border-[#1a1a1a]">
+      <section className="px-6 py-32 bg-[#FF6600] text-[#f0f0e8] border-b-2 border-[#1a1a1a]">
         <div className="max-w-4xl mx-auto text-center flex flex-col items-center">
           <h2 className="text-6xl md:text-8xl lg:text-9xl font-black uppercase tracking-tighter leading-[0.85] mb-8">
             START YOUR

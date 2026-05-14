@@ -12,37 +12,50 @@ export default function SignUpPage() {
       fallbackRedirectUrl={redirectUrl || "/dashboard"}
       appearance={{
         elements: {
+          // Primary button uses foreground/background pair so it
+          // stays high-contrast in both themes.
           formButtonPrimary:
-            "bg-[#1a1a1a] hover:bg-[#2d5a2d] text-[#f0f0e8] border-2 border-[#1a1a1a] rounded-none shadow-[4px_4px_0px_0px_var(--shadow-color)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[2px_2px_0px_0px_var(--shadow-color)] font-mono font-bold uppercase text-sm transition-all",
-          card: "bg-[#f0f0e8] border-2 border-[#1a1a1a] rounded-none shadow-[8px_8px_0px_0px_var(--shadow-color)]",
-          headerTitle: "text-[#1a1a1a] font-black uppercase tracking-tighter text-2xl font-mono",
-          headerSubtitle: "text-[#888] font-mono",
+            "bg-[var(--foreground)] hover:bg-[#FF6600] text-[var(--background)] hover:text-[#f0f0e8] border-2 border-[var(--border)] rounded-none shadow-[4px_4px_0px_0px_var(--shadow-color)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[2px_2px_0px_0px_var(--shadow-color)] font-mono font-bold uppercase text-sm transition-all",
+          card: "bg-[var(--background)] border-2 border-[var(--border)] rounded-none shadow-[8px_8px_0px_0px_var(--shadow-color)]",
+          headerTitle:
+            "text-[var(--foreground)] font-black uppercase tracking-tighter text-2xl font-mono",
+          headerSubtitle: "text-[var(--foreground-muted)] font-mono",
           socialButtonsBlockButton:
-            "border-2 border-[#1a1a1a] bg-transparent hover:bg-[#1a1a1a] text-[#1a1a1a] hover:text-[#f0f0e8] rounded-none transition-all hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[2px_2px_0px_0px_var(--shadow-color)] font-mono",
-          socialButtonsBlockButtonText: "!text-current font-bold uppercase font-mono",
+            "border-2 border-[var(--border)] bg-transparent hover:bg-[var(--foreground)] text-[var(--foreground)] hover:text-[var(--background)] rounded-none transition-all hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[2px_2px_0px_0px_var(--shadow-color)] font-mono",
+          socialButtonsBlockButtonText:
+            "!text-current font-bold uppercase font-mono",
           socialButtonsBlockButtonArrow: "text-current",
-          formFieldLabel: "text-[#1a1a1a] font-bold uppercase font-mono",
+          formFieldLabel:
+            "text-[var(--foreground)] font-bold uppercase font-mono",
           formFieldInput:
-            "bg-transparent border-2 border-[#1a1a1a] text-[#1a1a1a] focus:border-[#2d5a2d] focus:shadow-[4px_4px_0px_0px_var(--shadow-accent)] focus:ring-0 rounded-none font-mono",
-          footerActionLink: "text-[#2d5a2d] hover:text-[#1a1a1a] font-bold font-mono",
-          footerActionText: "text-[#888] font-mono",
-          dividerLine: "bg-[#1a1a1a]",
-          dividerText: "text-[#888] font-mono font-bold",
-          identityPreviewText: "text-[#1a1a1a] font-mono",
-          identityPreviewEditButton: "text-[#2d5a2d] hover:text-[#1a1a1a]",
-          formFieldInputShowPasswordButton: "text-[#888] hover:text-[#1a1a1a]",
+            "bg-transparent border-2 border-[var(--border)] text-[var(--foreground)] focus:border-[#FF6600] focus:shadow-[4px_4px_0px_0px_var(--shadow-accent)] focus:ring-0 rounded-none font-mono",
+          // OTP code inputs (the one-character cells used after
+          // "Email a code"). Force the digit color to follow the
+          // theme so dark mode shows white, light mode shows black.
+          otpCodeFieldInput:
+            "!text-[var(--foreground)] !bg-transparent !border-2 !border-[var(--border)] focus:!border-[#FF6600] !rounded-none font-mono",
+          footerActionLink:
+            "text-[#FF6600] hover:text-[var(--foreground)] font-bold font-mono",
+          footerActionText: "text-[var(--foreground-muted)] font-mono",
+          dividerLine: "bg-[var(--border)]",
+          dividerText: "text-[var(--foreground-muted)] font-mono font-bold",
+          identityPreviewText: "text-[var(--foreground)] font-mono",
+          identityPreviewEditButton:
+            "text-[#FF6600] hover:text-[var(--foreground)]",
+          formFieldInputShowPasswordButton:
+            "text-[var(--foreground-muted)] hover:text-[var(--foreground)]",
           footer: "hidden",
-          internal: "text-[#1a1a1a]",
+          internal: "text-[var(--foreground)]",
         },
         variables: {
-          colorPrimary: "#2d5a2d",
-          colorBackground: "#f0f0e8",
+          colorPrimary: "#FF6600",
+          colorBackground: "var(--background)",
           colorInputBackground: "transparent",
-          colorInputText: "#1a1a1a",
-          colorText: "#1a1a1a",
-          colorTextSecondary: "#888888",
+          colorInputText: "var(--foreground)",
+          colorText: "var(--foreground)",
+          colorTextSecondary: "var(--foreground-muted)",
           colorTextOnPrimaryBackground: "#f0f0e8",
-          colorNeutral: "#1a1a1a",
+          colorNeutral: "var(--border)",
           borderRadius: "0rem",
         },
       }}

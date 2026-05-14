@@ -1,12 +1,15 @@
 
 import { useConvex, useMutation, useAction } from "convex/react";
 import { api } from "@convex/_generated/api";
-import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { VideoPlayer, type VideoPlayerHandle } from "@/components/video-player/VideoPlayer";
+import { VideoPaywallControl } from "@/components/videos/VideoPaywallControl";
+import { VideoVersionDropdown } from "@/components/videos/VideoVersionDropdown";
+import { triggerDownload } from "@/lib/download";
 import { CommentList } from "@/components/comments/CommentList";
 import { CommentInput } from "@/components/comments/CommentInput";
 import { ShareDialog } from "@/components/ShareDialog";
@@ -19,6 +22,7 @@ import { useVideoPresence } from "@/lib/useVideoPresence";
 import { VideoWatchers } from "@/components/presence/VideoWatchers";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import {
+  ArrowLeft,
   Edit2,
   Check,
   X,
@@ -146,7 +150,16 @@ export default function VideoPage() {
   }, [getPlaybackSession, isPlayable, resolvedVideoId, video?.muxPlaybackId]);
 
   useEffect(() => {
-    if (!resolvedVideoId || !video || video.status === "uploading" || video.status === "failed") {
+    if (
+      !resolvedVideoId ||
+      !video ||
+      video.status === "uploading" ||
+      video.status === "failed" ||
+      // Seeded demo videos have a Mux playback ID but no s3Key — there's
+      // nothing in object storage to fetch. Skip the action so we don't
+      // log "Original bucket file not found" on every page load.
+      !video.s3Key
+    ) {
       setOriginalPlaybackUrl(null);
       setIsLoadingOriginalPlayback(false);
       return;
@@ -252,51 +265,54 @@ export default function VideoPage() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Header */}
-      <DashboardHeader paths={[
-        {
-          label: resolvedTeamSlug,
-          href: teamHomePath(resolvedTeamSlug),
-          prewarmIntentHandlers: prewarmTeamIntentHandlers,
-        },
-        {
-          label: context?.project?.name ?? "project",
-          href: projectPath(resolvedTeamSlug, resolvedProjectId),
-          prewarmIntentHandlers: prewarmProjectIntentHandlers,
-        },
-        { 
-          label: isEditingTitle ? (
-            <div className="flex items-center gap-2">
+      {/* Header — no breadcrumbs on the video page. The Back button +
+          inline title sit on the left where the breadcrumb used to be. */}
+      <DashboardHeader hideBreadcrumb>
+        <div className="flex items-center gap-2 min-w-0 mr-auto">
+          <Link
+            to={projectPath(resolvedTeamSlug, resolvedProjectId)}
+            preload="intent"
+            {...prewarmProjectIntentHandlers}
+            className="inline-flex items-center gap-1 px-3 h-9 border-2 border-[#1a1a1a] text-xs font-bold uppercase tracking-wider bg-[#f0f0e8] text-[#1a1a1a] shadow-[4px_4px_0px_0px_var(--shadow-color)] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[2px_2px_0px_0px_var(--shadow-color)] active:translate-y-[2px] active:translate-x-[2px] transition-all flex-shrink-0"
+            title="Back to project"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Back
+          </Link>
+          {isEditingTitle ? (
+            <div className="flex items-center gap-2 min-w-0">
               <Input
                 value={editedTitle}
                 onChange={(e) => setEditedTitle(e.target.value)}
-                className="w-40 sm:w-64 h-8 text-base font-black tracking-tighter uppercase font-mono"
+                className="w-40 sm:w-64 h-9 text-base font-black tracking-tighter uppercase font-mono"
                 autoFocus
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleSaveTitle();
                   if (e.key === "Escape") setIsEditingTitle(false);
                 }}
               />
-              <Button size="icon" variant="ghost" className="h-8 w-8" onClick={handleSaveTitle}>
+              <Button size="icon" variant="ghost" className="h-9 w-9" onClick={handleSaveTitle}>
                 <Check className="h-4 w-4" />
               </Button>
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-8 w-8"
+                className="h-9 w-9"
                 onClick={() => setIsEditingTitle(false)}
               >
                 <X className="h-4 w-4" />
               </Button>
             </div>
           ) : (
-            <div className="flex items-center gap-2">
-              <span className="truncate max-w-[150px] sm:max-w-[300px]">{video.title}</span>
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-base font-black tracking-tighter text-[#1a1a1a] truncate max-w-[200px] sm:max-w-[360px]">
+                {video.title}
+              </span>
               {canEdit && (
                 <Button
                   size="icon"
                   variant="ghost"
-                  className="h-6 w-6"
+                  className="h-7 w-7 flex-shrink-0"
                   onClick={startEditingTitle}
                 >
                   <Edit2 className="h-3 w-3" />
@@ -312,21 +328,11 @@ export default function VideoPage() {
                 </Badge>
               )}
             </div>
-          )
-        }
-      ]}>
-        {/* Desktop: inline actions */}
-        <div className="hidden sm:flex items-center gap-3 text-xs text-[#888]">
-          <span className="truncate max-w-[100px]">{video.uploaderName}</span>
-          {video.duration && (
-            <>
-              <span className="text-[#ccc]">·</span>
-              <span className="font-mono">{formatDuration(video.duration)}</span>
-            </>
           )}
-          <VideoWatchers watchers={watchers} />
         </div>
-        <div className="hidden sm:flex items-center gap-3 flex-shrink-0 border-l-2 border-[#1a1a1a]/20 pl-3 ml-1">
+        {/* Desktop: inline actions. All buttons share h-9 so the row
+            doesn't look ragged. */}
+        <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
           <VideoWorkflowStatusControl
             status={video.workflowStatus}
             size="lg"
@@ -335,13 +341,35 @@ export default function VideoPage() {
               void handleUpdateWorkflowStatus(workflowStatus);
             }}
           />
-          <Button variant="outline" onClick={() => setShareDialogOpen(true)}>
+          {resolvedVideoId && resolvedProjectId ? (
+            <VideoVersionDropdown
+              teamSlug={resolvedTeamSlug}
+              projectId={resolvedProjectId}
+              videoId={resolvedVideoId}
+              canEdit={canEdit}
+            />
+          ) : null}
+          {resolvedVideoId ? (
+            <VideoPaywallControl
+              videoId={resolvedVideoId}
+              isDownloading={false}
+              onRequestPrivateDownload={async () => {
+                const result = await requestDownload();
+                if (result?.url) triggerDownload(result.url, result.filename);
+              }}
+            />
+          ) : null}
+          <Button
+            variant="outline"
+            className="h-9"
+            onClick={() => setShareDialogOpen(true)}
+          >
             <LinkIcon className="mr-1.5 h-4 w-4" />
             Share
           </Button>
           <Button
             variant="outline"
-            className="lg:hidden"
+            className="h-9 lg:hidden"
             onClick={() => setMobileCommentsOpen(true)}
           >
             <MessageSquare className="h-4 w-4" />
@@ -387,7 +415,7 @@ export default function VideoPage() {
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-black">
           {video.status === "processing" && isUsingOriginalFallback && activePlaybackUrl ? (
             <div className="flex-shrink-0 flex items-center gap-2 bg-[#1a1a1a] px-4 py-2 text-sm text-white">
-              <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-[#2d5a2d]" />
+              <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-[#FF6600]" />
               <span className="font-semibold">Original playback active.</span>
               <span className="text-white/60">720p stream is still encoding.</span>
             </div>

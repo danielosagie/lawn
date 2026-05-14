@@ -27,22 +27,22 @@ export default function Homepage() {
     '--foreground-inverse': '#f0f0e8',
     '--border': '#1a1a1a',
     '--border-subtle': '#cccccc',
-    '--accent': '#2d5a2d',
-    '--accent-hover': '#3a6a3a',
-    '--accent-light': '#7cb87c',
+    '--accent': '#FF6600',
+    '--accent-hover': '#FF7A1F',
+    '--accent-light': '#FFB380',
     '--shadow-color': '#1a1a1a',
-    '--shadow-accent': 'rgba(45,90,45,1)',
+    '--shadow-accent': '#FF6600',
   } as React.CSSProperties;
 
   return (
     <div 
-      className="min-h-screen font-mono selection:bg-[#2d5a2d] selection:text-[#f0f0e8]" 
+      className="min-h-screen font-mono selection:bg-[#FF6600] selection:text-[#f0f0e8]" 
       style={{ ...lightModeVars, backgroundColor: 'var(--background)', color: 'var(--foreground)' }}
     >
       {/* Minimal nav */}
       <nav className={`fixed w-full top-0 z-50 px-6 py-4 flex justify-between items-center transition-all duration-200 ${scrolled ? 'bg-[#f0f0e8] text-[#1a1a1a] border-b-2 border-[#1a1a1a]' : 'bg-transparent text-[#f0f0e8] drop-shadow-md'}`}>
         <div className="flex items-center gap-4">
-          <span className={`text-xl font-black tracking-tighter transition-opacity duration-200 ${scrolled ? 'opacity-100' : 'opacity-0'}`}>lawn.</span>
+          <span className={`text-xl font-black tracking-tighter transition-opacity duration-200 ${scrolled ? 'opacity-100' : 'opacity-0'}`}>snip.</span>
         </div>
         <div className="flex gap-6 items-center text-sm font-bold uppercase tracking-wide">
           <a href="#pricing" className="hover:underline underline-offset-4">Pricing</a>
@@ -55,31 +55,31 @@ export default function Homepage() {
       {/* Hero */}
       <section 
         className="relative px-6 pt-32 pb-32 md:pb-24 min-h-[85vh] flex flex-col justify-end bg-cover bg-center bg-no-repeat text-[#f0f0e8] border-b-2 border-[#1a1a1a] overflow-x-clip"
-        style={{ backgroundImage: `url('/grassy-bg.avif')` }}
+        style={{ backgroundImage: `url('/sandy-bg.jpg')` }}
       >
-        {/* Lighter tint since text is now in highly contrasting blocks or heavily shadowed */}
-        <div className="absolute inset-0 bg-black/10 pointer-events-none" />
+        {/* Darken photo so hero type and stickers read clearly */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/40 to-black/25 pointer-events-none" />
 
         <div className="relative z-10 w-full max-w-7xl mx-auto">
           {/* Massive Title with Brutalist Depth */}
-          <h1 
+          <h1
             className="text-[25vw] sm:text-[22vw] font-black leading-[0.75] tracking-tighter ml-[-0.5vw]"
-            style={{ 
+            style={{
               textShadow: '8px 8px 0 #1a1a1a, 0 20px 40px rgba(0,0,0,0.5)'
             }}
           >
-            lawn
+            snip<span className="text-[#FF6600]">.</span>
           </h1>
 
           <div className="flex flex-col lg:flex-row lg:justify-between lg:items-end gap-12 mt-20 md:mt-24">
-            
+
             {/* Highly Creative Contrast Subheadline Blocks (Stickers) */}
             <div className="flex flex-col items-start gap-4 md:gap-6 max-w-full">
               <div className="bg-[#f0f0e8] text-[#1a1a1a] px-5 py-3 md:px-8 md:py-4 border-2 border-[#1a1a1a] shadow-[6px_6px_0px_0px_var(--shadow-color)] md:shadow-[8px_8px_0px_0px_var(--shadow-color)] -rotate-2 origin-bottom-left max-w-full">
-                <p className="text-2xl sm:text-3xl md:text-4xl font-black tracking-tight uppercase leading-tight md:leading-none">Video review for creative teams.</p>
+                <p className="text-2xl sm:text-3xl md:text-4xl font-black tracking-tight uppercase leading-tight md:leading-none">Review, contract, deliver. One link.</p>
               </div>
-              <div className="bg-[#2d5a2d] text-[#f0f0e8] px-5 py-3 md:px-8 md:py-4 border-2 border-[#1a1a1a] shadow-[6px_6px_0px_0px_var(--shadow-color)] md:shadow-[8px_8px_0px_0px_var(--shadow-color)] rotate-1 origin-top-left ml-2 md:ml-8 max-w-full">
-                <p className="text-xl sm:text-2xl md:text-3xl font-black tracking-tight uppercase leading-tight md:leading-none">Less features. No bull$#!t.</p>
+              <div className="bg-[#FF6600] text-[#f0f0e8] px-5 py-3 md:px-8 md:py-4 border-2 border-[#1a1a1a] shadow-[6px_6px_0px_0px_var(--shadow-color)] md:shadow-[8px_8px_0px_0px_var(--shadow-color)] rotate-1 origin-top-left ml-2 md:ml-8 max-w-full">
+                <p className="text-xl sm:text-2xl md:text-3xl font-black tracking-tight uppercase leading-tight md:leading-none">For freelancers who hate chasing invoices.</p>
               </div>
             </div>
 
@@ -89,7 +89,7 @@ export default function Homepage() {
                 <span className="block text-xs md:text-sm font-bold uppercase tracking-wider text-[#888] mt-1 md:mt-2">Unlimited seats</span>
               </div>
               <Link to="/sign-up"
-                className="bg-[#1a1a1a] text-[#f0f0e8] px-6 py-4 md:px-8 md:py-5 border-2 border-[#1a1a1a] font-black text-lg md:text-xl hover:bg-[#2d5a2d] transition-colors flex items-center justify-center shadow-[6px_6px_0px_0px_var(--shadow-color)] md:shadow-[8px_8px_0px_0px_var(--shadow-color)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[4px_4px_0px_0px_var(--shadow-color)] md:hover:shadow-[6px_6px_0px_0px_var(--shadow-color)] self-start sm:self-auto"
+                className="bg-[#1a1a1a] text-[#f0f0e8] px-6 py-4 md:px-8 md:py-5 border-2 border-[#1a1a1a] font-black text-lg md:text-xl hover:bg-[#FF6600] transition-colors flex items-center justify-center shadow-[6px_6px_0px_0px_var(--shadow-color)] md:shadow-[8px_8px_0px_0px_var(--shadow-color)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[4px_4px_0px_0px_var(--shadow-color)] md:hover:shadow-[6px_6px_0px_0px_var(--shadow-color)] self-start sm:self-auto"
               >
                 START FREE TRIAL →
               </Link>
@@ -108,7 +108,7 @@ export default function Homepage() {
             { id: "04", title: "SIMPLE SHARING", desc: "Just copy the link and send it to your client." },
           ].map((item, i) => (
             <div key={i} className="p-8 lg:p-12 group hover:bg-[#1a1a1a] hover:text-[#f0f0e8] transition-colors flex flex-col">
-              <div className="text-sm font-black text-[#888] group-hover:text-[#7cb87c] mb-8">/{item.id}</div>
+              <div className="text-sm font-black text-[#888] group-hover:text-[#FFB380] mb-8">/{item.id}</div>
               <h3 className="text-3xl lg:text-4xl font-black mb-4 uppercase tracking-tighter leading-none">{item.title}</h3>
               <p className="text-lg font-medium opacity-80 mt-auto">{item.desc}</p>
             </div>
@@ -135,7 +135,7 @@ export default function Homepage() {
                   <span className="text-xl font-bold tracking-widest text-[#888] mb-1">STEP</span>
                 </div>
                 <div className="p-8 flex-grow flex flex-col">
-                  <h3 className="text-3xl md:text-4xl font-black uppercase tracking-tighter mb-4 text-[#2d5a2d]">{item.action}</h3>
+                  <h3 className="text-3xl md:text-4xl font-black uppercase tracking-tighter mb-4 text-[#FF6600]">{item.action}</h3>
                   <p className="text-lg font-medium text-[#1a1a1a]">{item.desc}</p>
                 </div>
               </div>
@@ -191,36 +191,36 @@ export default function Homepage() {
 
                 {/* Us */}
                 <div className="p-8 md:p-12 bg-[#1a1a1a] text-[#f0f0e8]">
-                  <div className="text-sm font-bold tracking-widest text-[#7cb87c] mb-2">THE SOLUTION</div>
-                  <div className="text-5xl font-black tracking-tighter mb-8 text-[#7cb87c]">lawn</div>
+                  <div className="text-sm font-bold tracking-widest text-[#FFB380] mb-2">THE SOLUTION</div>
+                  <div className="text-5xl font-black tracking-tighter mb-8 text-[#FFB380]">snip</div>
                   
                   <div className="mb-8">
-                    <div className="text-3xl font-black text-[#7cb87c]">$5</div>
+                    <div className="text-3xl font-black text-[#FFB380]">$5</div>
                     <div className="text-[#888] font-bold uppercase text-sm tracking-wider">Flat total / month</div>
                   </div>
 
                   <ul className="space-y-4 text-lg font-medium">
                     <li className="flex items-start gap-3">
-                      <span className="text-[#7cb87c] font-black">✓</span>
+                      <span className="text-[#FFB380] font-black">✓</span>
                       Stupidly fast
                     </li>
                     <li className="flex items-start gap-3">
-                      <span className="text-[#7cb87c] font-black">✓</span>
+                      <span className="text-[#FFB380] font-black">✓</span>
                       Invite the whole team
                     </li>
                     <li className="flex items-start gap-3">
-                      <span className="text-[#7cb87c] font-black">✓</span>
+                      <span className="text-[#FFB380] font-black">✓</span>
                       Just what you need
                     </li>
                     <li className="flex items-start gap-3">
-                      <span className="text-[#7cb87c] font-black">✓</span>
+                      <span className="text-[#FFB380] font-black">✓</span>
                       Fully open source
                     </li>
                   </ul>
                   
                   <div className="mt-12 pt-6 border-t border-[#333]">
                     <span className="block text-sm font-bold text-[#888] uppercase tracking-wider mb-1">Yearly savings (5 users)</span>
-                    <span className="text-4xl font-black text-[#7cb87c]">$1,080</span>
+                    <span className="text-4xl font-black text-[#FFB380]">$1,080</span>
                   </div>
                 </div>
               </div>
@@ -230,12 +230,12 @@ export default function Homepage() {
       </section>
 
       {/* Quote */}
-      <section className="px-6 py-32 bg-[#2d5a2d] text-[#f0f0e8] border-b-2 border-[#1a1a1a]">
+      <section className="px-6 py-32 bg-[#FF6600] text-[#f0f0e8] border-b-2 border-[#1a1a1a]">
         <div className="max-w-5xl mx-auto text-center">
           <blockquote className="text-4xl md:text-6xl font-black uppercase tracking-tighter leading-tight mb-8">
-            "I built lawn because I got tired of waiting for Frame.io to load. Video review should be instant."
+            "I built snip because I got tired of waiting for Frame.io to load. Video review should be instant."
           </blockquote>
-          <a href="https://x.com/theo" target="_blank" rel="noopener noreferrer" className="inline-block border-2 border-[#f0f0e8] px-6 py-3 font-bold uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#2d5a2d] transition-colors">
+          <a href="https://x.com/theo" target="_blank" rel="noopener noreferrer" className="inline-block border-2 border-[#f0f0e8] px-6 py-3 font-bold uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#FF6600] transition-colors">
             — Theo
           </a>
         </div>
@@ -256,29 +256,29 @@ export default function Homepage() {
               <p className="text-lg font-medium text-[#1a1a1a] mb-8">Unlimited everything, except storage.</p>
               
               <ul className="space-y-4 text-lg font-bold flex-grow mb-8">
-                <li className="flex items-center gap-3"><span className="text-[#2d5a2d] text-2xl">✓</span> Unlimited seats</li>
-                <li className="flex items-center gap-3"><span className="text-[#2d5a2d] text-2xl">✓</span> Unlimited projects</li>
-                <li className="flex items-center gap-3"><span className="text-[#2d5a2d] text-2xl">✓</span> Unlimited clients</li>
-                <li className="flex items-center gap-3"><span className="text-[#2d5a2d] text-2xl">✓</span> 100GB Storage</li>
+                <li className="flex items-center gap-3"><span className="text-[#FF6600] text-2xl">✓</span> Unlimited seats</li>
+                <li className="flex items-center gap-3"><span className="text-[#FF6600] text-2xl">✓</span> Unlimited projects</li>
+                <li className="flex items-center gap-3"><span className="text-[#FF6600] text-2xl">✓</span> Unlimited clients</li>
+                <li className="flex items-center gap-3"><span className="text-[#FF6600] text-2xl">✓</span> 100GB Storage</li>
               </ul>
               
-              <Link to="/sign-up" className="bg-[#1a1a1a] text-[#f0f0e8] text-center py-4 border-2 border-[#1a1a1a] font-black uppercase hover:bg-[#2d5a2d] transition-colors">Get Basic</Link>
+              <Link to="/sign-up" className="bg-[#1a1a1a] text-[#f0f0e8] text-center py-4 border-2 border-[#1a1a1a] font-black uppercase hover:bg-[#FF6600] transition-colors">Get Basic</Link>
             </div>
 
             {/* $25 Plan */}
             <div className="bg-[#1a1a1a] text-[#f0f0e8] border-2 border-[#1a1a1a] shadow-[8px_8px_0px_0px_var(--shadow-color)] p-8 w-full max-w-md flex flex-col transform md:-translate-y-4 hover:-translate-y-6 hover:translate-x-2 hover:shadow-[4px_4px_0px_0px_var(--shadow-color)] transition-all">
               <div className="flex justify-between items-start mb-2">
-                <div className="text-xl font-bold uppercase tracking-widest text-[#7cb87c]">Pro</div>
-                <div className="bg-[#2d5a2d] text-xs font-black px-2 py-1 uppercase tracking-wider -rotate-3">Big files</div>
+                <div className="text-xl font-bold uppercase tracking-widest text-[#FFB380]">Pro</div>
+                <div className="bg-[#FF6600] text-xs font-black px-2 py-1 uppercase tracking-wider -rotate-3">Big files</div>
               </div>
               <div className="text-6xl font-black tracking-tighter mb-4">$25<span className="text-2xl text-[#888]">/mo</span></div>
               <p className="text-lg font-medium mb-8">Literally the exact same thing but more space.</p>
               
               <ul className="space-y-4 text-lg font-bold flex-grow mb-8">
-                <li className="flex items-center gap-3"><span className="text-[#7cb87c] text-2xl">✓</span> Unlimited seats</li>
-                <li className="flex items-center gap-3"><span className="text-[#7cb87c] text-2xl">✓</span> Unlimited projects</li>
-                <li className="flex items-center gap-3"><span className="text-[#7cb87c] text-2xl">✓</span> Unlimited clients</li>
-                <li className="flex items-center gap-3"><span className="text-[#7cb87c] text-2xl">✓</span> 1TB Storage (Whoa)</li>
+                <li className="flex items-center gap-3"><span className="text-[#FFB380] text-2xl">✓</span> Unlimited seats</li>
+                <li className="flex items-center gap-3"><span className="text-[#FFB380] text-2xl">✓</span> Unlimited projects</li>
+                <li className="flex items-center gap-3"><span className="text-[#FFB380] text-2xl">✓</span> Unlimited clients</li>
+                <li className="flex items-center gap-3"><span className="text-[#FFB380] text-2xl">✓</span> 1TB Storage (Whoa)</li>
               </ul>
               
               <Link to="/sign-up" className="bg-[#f0f0e8] text-[#1a1a1a] text-center py-4 border-2 border-[#f0f0e8] font-black uppercase hover:bg-[#d8d8d0] transition-colors">Get Pro</Link>
@@ -297,7 +297,7 @@ export default function Homepage() {
             Basic is $5/month. Pro is $25/month.
           </p>
           <Link to="/sign-up"
-            className="bg-[#1a1a1a] text-[#f0f0e8] px-12 py-6 border-2 border-[#1a1a1a] text-2xl font-black uppercase tracking-wider hover:bg-[#2d5a2d] hover:border-[#2d5a2d] transition-colors shadow-[12px_12px_0px_0px_var(--shadow-accent)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[8px_8px_0px_0px_var(--shadow-accent)]"
+            className="bg-[#1a1a1a] text-[#f0f0e8] px-12 py-6 border-2 border-[#1a1a1a] text-2xl font-black uppercase tracking-wider hover:bg-[#FF6600] hover:border-[#FF6600] transition-colors shadow-[12px_12px_0px_0px_var(--shadow-accent)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[8px_8px_0px_0px_var(--shadow-accent)]"
           >
             CREATE YOUR TEAM
           </Link>
@@ -313,10 +313,10 @@ export default function Homepage() {
           __html: JSON.stringify({
             "@context": "https://schema.org",
             "@type": "SoftwareApplication",
-            name: "lawn",
+            name: "snip",
             description:
               "Video review and collaboration for creative teams. Frame-accurate comments, unlimited seats, flat pricing.",
-            url: "https://lawn.video",
+            url: "https://snip.film",
             applicationCategory: "MultimediaApplication",
             operatingSystem: "Web",
             offers: [

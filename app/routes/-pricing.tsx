@@ -35,26 +35,26 @@ export default function PricingPage() {
 
               <ul className="space-y-4 text-lg font-bold flex-grow mb-8">
                 <li className="flex items-center gap-3">
-                  <span className="text-[#2d5a2d] text-2xl">&#10003;</span>{" "}
+                  <span className="text-[#FF6600] text-2xl">&#10003;</span>{" "}
                   Unlimited seats
                 </li>
                 <li className="flex items-center gap-3">
-                  <span className="text-[#2d5a2d] text-2xl">&#10003;</span>{" "}
+                  <span className="text-[#FF6600] text-2xl">&#10003;</span>{" "}
                   Unlimited projects
                 </li>
                 <li className="flex items-center gap-3">
-                  <span className="text-[#2d5a2d] text-2xl">&#10003;</span>{" "}
+                  <span className="text-[#FF6600] text-2xl">&#10003;</span>{" "}
                   Unlimited clients
                 </li>
                 <li className="flex items-center gap-3">
-                  <span className="text-[#2d5a2d] text-2xl">&#10003;</span>{" "}
+                  <span className="text-[#FF6600] text-2xl">&#10003;</span>{" "}
                   100GB Storage
                 </li>
               </ul>
 
               <Link
                 to="/sign-up"
-                className="bg-[#1a1a1a] text-[#f0f0e8] text-center py-4 border-2 border-[#1a1a1a] font-black uppercase hover:bg-[#2d5a2d] transition-colors"
+                className="bg-[#1a1a1a] text-[#f0f0e8] text-center py-4 border-2 border-[#1a1a1a] font-black uppercase hover:bg-[#FF6600] transition-colors"
               >
                 Get Basic
               </Link>
@@ -63,10 +63,10 @@ export default function PricingPage() {
             {/* Pro */}
             <div className="bg-[#1a1a1a] text-[#f0f0e8] border-2 border-[#1a1a1a] shadow-[8px_8px_0px_0px_#1a1a1a] p-8 w-full max-w-md flex flex-col transform md:-translate-y-4 hover:-translate-y-6 hover:translate-x-2 hover:shadow-[4px_4px_0px_0px_#1a1a1a] transition-all">
               <div className="flex justify-between items-start mb-2">
-                <div className="text-xl font-bold uppercase tracking-widest text-[#7cb87c]">
+                <div className="text-xl font-bold uppercase tracking-widest text-[#FFB380]">
                   Pro
                 </div>
-                <div className="bg-[#2d5a2d] text-xs font-black px-2 py-1 uppercase tracking-wider -rotate-3">
+                <div className="bg-[#FF6600] text-xs font-black px-2 py-1 uppercase tracking-wider -rotate-3">
                   Big files
                 </div>
               </div>
@@ -79,19 +79,19 @@ export default function PricingPage() {
 
               <ul className="space-y-4 text-lg font-bold flex-grow mb-8">
                 <li className="flex items-center gap-3">
-                  <span className="text-[#7cb87c] text-2xl">&#10003;</span>{" "}
+                  <span className="text-[#FFB380] text-2xl">&#10003;</span>{" "}
                   Unlimited seats
                 </li>
                 <li className="flex items-center gap-3">
-                  <span className="text-[#7cb87c] text-2xl">&#10003;</span>{" "}
+                  <span className="text-[#FFB380] text-2xl">&#10003;</span>{" "}
                   Unlimited projects
                 </li>
                 <li className="flex items-center gap-3">
-                  <span className="text-[#7cb87c] text-2xl">&#10003;</span>{" "}
+                  <span className="text-[#FFB380] text-2xl">&#10003;</span>{" "}
                   Unlimited clients
                 </li>
                 <li className="flex items-center gap-3">
-                  <span className="text-[#7cb87c] text-2xl">&#10003;</span> 1TB
+                  <span className="text-[#FFB380] text-2xl">&#10003;</span> 1TB
                   Storage
                 </li>
               </ul>
@@ -133,7 +133,7 @@ export default function PricingPage() {
                 a: "Yes. Sign up and try it. No credit card required to start.",
               },
               {
-                q: "Is lawn really open source?",
+                q: "Is snip really open source?",
                 a: "Fully. Check our GitHub. Read the code, fork it, whatever you want.",
               },
             ].map((item, i) => (
@@ -159,7 +159,7 @@ export default function PricingPage() {
           </p>
           <Link
             to="/sign-up"
-            className="bg-[#f0f0e8] text-[#1a1a1a] px-12 py-6 border-2 border-[#f0f0e8] text-2xl font-black uppercase tracking-wider hover:bg-[#2d5a2d] hover:text-[#f0f0e8] hover:border-[#2d5a2d] transition-colors shadow-[8px_8px_0px_0px_rgba(45,90,45,1)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[4px_4px_0px_0px_rgba(45,90,45,1)]"
+            className="bg-[#f0f0e8] text-[#1a1a1a] px-12 py-6 border-2 border-[#f0f0e8] text-2xl font-black uppercase tracking-wider hover:bg-[#FF6600] hover:text-[#f0f0e8] hover:border-[#FF6600] transition-colors shadow-[8px_8px_0px_0px_rgba(45,90,45,1)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[4px_4px_0px_0px_rgba(45,90,45,1)]"
           >
             START FREE TRIAL
           </Link>

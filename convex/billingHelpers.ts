@@ -115,15 +115,63 @@ export async function getTeamStorageUsedBytes(
   return total;
 }
 
+/**
+ * Demo / self-host bypass. When STRIPE_SECRET_KEY is absent we treat the
+ * deployment as unmonetized — anyone can create projects and upload up to
+ * the basic-plan storage limit. This makes the fork actually usable as a
+ * single-tenant tool without standing up Stripe just to demo.
+ */
+function isBillingEnforced(): boolean {
+  const secret = process.env.STRIPE_SECRET_KEY;
+  return typeof secret === "string" && secret.trim().length > 0;
+}
+
+/**
+ * Active subscription gate, post-workspace-billing.
+ *
+ * Order of checks:
+ *   1. Stripe not configured → demo mode, never enforce.
+ *   2. Team owner has an active workspace subscription → pass.
+ *      (Workspace subs replaced per-team subs; one Stripe customer
+ *      covers every team the owner runs.)
+ *   3. Legacy per-team subscription still active → pass.
+ *      (Keeps existing customers from breaking during the migration.)
+ *   4. Otherwise → throw.
+ */
 export async function assertTeamHasActiveSubscription(
   ctx: BillingCtx,
   teamId: Id<"teams">,
 ) {
   const state = await getTeamSubscriptionState(ctx, teamId);
-  if (!state.hasActiveSubscription) {
-    throw new Error("An active Basic or Pro subscription is required.");
+  if (!isBillingEnforced()) {
+    return state;
   }
-  return state;
+
+  // Workspace-level subscription check (preferred).
+  const team = state.team;
+  if (team?.ownerClerkId) {
+    const workspaceSub = await ctx.db
+      .query("workspaceSubscriptions")
+      .withIndex("by_owner", (q) => q.eq("ownerClerkId", team.ownerClerkId))
+      .unique();
+    if (
+      workspaceSub &&
+      (workspaceSub.status === "active" ||
+        workspaceSub.status === "trialing")
+    ) {
+      return state;
+    }
+  }
+
+  // Legacy per-team subscription path (only triggers for accounts that
+  // signed up before workspace billing landed).
+  if (state.hasActiveSubscription) {
+    return state;
+  }
+
+  throw new Error(
+    "No active workspace subscription. Pick a plan in Billing & usage to keep creating projects and uploading.",
+  );
 }
 
 export async function assertTeamCanStoreBytes(
@@ -136,7 +184,10 @@ export async function assertTeamCanStoreBytes(
   const storageLimitBytes = TEAM_PLAN_STORAGE_LIMIT_BYTES[state.plan];
   const requestedBytes = Number.isFinite(incomingBytes) ? Math.max(0, incomingBytes) : 0;
 
-  if (storageUsedBytes + requestedBytes > storageLimitBytes) {
+  if (
+    isBillingEnforced() &&
+    storageUsedBytes + requestedBytes > storageLimitBytes
+  ) {
     throw new Error(
       `Storage limit reached for the ${state.plan} plan. Upgrade to continue uploading.`,
     );
