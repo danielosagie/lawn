@@ -67,7 +67,7 @@ function TextOverlay({
             color: "#f0f0e8",
             lineHeight: 0.9,
             letterSpacing: "-0.04em",
-            textShadow: "4px 4px 0 #1a1a1a, 0 8px 24px rgba(0,0,0,0.5)",
+            textShadow: "4px 4px 0 #1a1a1a, 0 8px 20px rgba(0,0,0,0.28)",
           }}
         >
           {title}

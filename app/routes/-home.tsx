@@ -40,7 +40,7 @@ export default function Homepage() {
       style={{ ...lightModeVars, backgroundColor: 'var(--background)', color: 'var(--foreground)' }}
     >
       {/* Minimal nav */}
-      <nav className={`fixed w-full top-0 z-50 px-6 py-4 flex justify-between items-center transition-all duration-200 ${scrolled ? 'bg-[#f0f0e8] text-[#1a1a1a] border-b-2 border-[#1a1a1a]' : 'bg-transparent text-[#f0f0e8] drop-shadow-md'}`}>
+      <nav className={`fixed w-full top-0 z-50 px-6 py-4 flex justify-between items-center transition-all duration-200 ${scrolled ? 'bg-[#f0f0e8] text-[#1a1a1a] border-b-2 border-[#1a1a1a]' : 'bg-transparent text-[#f0f0e8] drop-shadow-sm'}`}>
         <div className="flex items-center gap-4">
           <span className={`text-xl font-black tracking-tighter transition-opacity duration-200 ${scrolled ? 'opacity-100' : 'opacity-0'}`}>snip.</span>
         </div>
@@ -65,7 +65,8 @@ export default function Homepage() {
           <h1
             className="text-[25vw] sm:text-[22vw] font-black leading-[0.75] tracking-tighter ml-[-0.5vw]"
             style={{
-              textShadow: '8px 8px 0 #1a1a1a, 0 20px 40px rgba(0,0,0,0.5)'
+              textShadow:
+                '4px 4px 0 #1a1a1a, 0 8px 20px rgba(0,0,0,0.28)',
             }}
           >
             snip<span className="text-[#FF6600]">.</span>
