@@ -30,8 +30,8 @@ export const Route = createRootRoute({
     links: [
       { rel: "stylesheet", href: appCss },
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg?v=1" },
-      { rel: "icon", type: "image/x-icon", href: "/favicon.ico?v=4" },
-      { rel: "shortcut icon", href: "/favicon.ico?v=4" },
+      { rel: "icon", type: "image/x-icon", href: "/favicon.ico?v=5" },
+      { rel: "shortcut icon", href: "/favicon.ico?v=5" },
       { rel: "preconnect", href: "https://stream.mux.com", crossOrigin: "anonymous" },
       { rel: "preconnect", href: "https://image.mux.com", crossOrigin: "anonymous" },
       { rel: "dns-prefetch", href: "//stream.mux.com" },
