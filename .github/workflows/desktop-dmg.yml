@@ -59,6 +59,13 @@ jobs:
         working-directory: desktop
         run: bun install --frozen-lockfile
 
+      - name: Install icon-generation tools
+        run: brew install librsvg
+
+      - name: Generate DMG assets (icon.icns + background)
+        working-directory: desktop
+        run: bun run generate:dmg-assets
+
       - name: Build renderer
         working-directory: desktop
         run: bun run build:renderer
