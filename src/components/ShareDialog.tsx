@@ -266,10 +266,7 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
             dialog stays single-purpose. */}
         {video?.visibility === "private" ? (
         <>
-        <section className="border-2 border-[#1a1a1a] p-5 bg-[#e8e8e0] space-y-5">
-          <h3 className="font-bold text-sm text-[#1a1a1a] uppercase tracking-wider">
-            New link
-          </h3>
+        <section className="border-2 border-[#1a1a1a] p-5 bg-[#e8e8e0] space-y-5 pb-3">
 
           {containingFolder ? (
             <div className="space-y-1.5">
