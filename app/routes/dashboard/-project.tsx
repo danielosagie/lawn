@@ -47,6 +47,7 @@ import { prewarmTeam } from "./-team.data";
 import { prewarmVideo } from "./-video.data";
 import { useDashboardUploadContext } from "@/lib/dashboardUploadContext";
 import { DashboardHeader } from "@/components/DashboardHeader";
+import { ShareSelectionDialog } from "@/components/ShareSelectionDialog";
 
 type ViewMode = ProjectViewMode;
 type ShareToastState = {
@@ -90,7 +91,11 @@ type VideoIntentTargetProps = {
   videoId: Id<"videos">;
   muxPlaybackId?: string;
   draggable?: boolean;
+  selected?: boolean;
   onOpen: () => void;
+  onSelectToggle?: (
+    event: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean },
+  ) => void;
   children: ReactNode;
 };
 
@@ -101,7 +106,9 @@ function VideoIntentTarget({
   videoId,
   muxPlaybackId,
   draggable,
+  selected,
   onOpen,
+  onSelectToggle,
   children,
 }: VideoIntentTargetProps) {
   const convex = useConvex();
@@ -119,8 +126,23 @@ function VideoIntentTarget({
 
   return (
     <div
-      className={className}
-      onClick={onOpen}
+      className={`${className}${selected ? " ring-2 ring-[#FF6600] ring-offset-2 ring-offset-[#f0f0e8]" : ""}`}
+      onClick={(e) => {
+        // Cmd/Ctrl+click toggles a single item, Shift+click extends the
+        // range. Plain click falls through to onOpen. The selection-toggle
+        // callback owns whichever modifier behavior is set up at the parent.
+        if (onSelectToggle && (e.metaKey || e.ctrlKey || e.shiftKey)) {
+          e.preventDefault();
+          e.stopPropagation();
+          onSelectToggle({
+            metaKey: e.metaKey,
+            ctrlKey: e.ctrlKey,
+            shiftKey: e.shiftKey,
+          });
+          return;
+        }
+        onOpen();
+      }}
       draggable={draggable}
       onDragStart={(e) => {
         if (!draggable) return;
@@ -173,6 +195,34 @@ export default function ProjectPage({
   const [search, setSearch] = useState("");
   const [shareToast, setShareToast] = useState<ShareToastState | null>(null);
   const shareToastTimeoutRef = useRef<number | null>(null);
+
+  // Multi-select for ad-hoc bundle sharing. Cmd/Ctrl+click toggles single
+  // items, Shift+click extends the range from the last clicked item.
+  // Plain click on a video opens it (existing behavior), but clears the
+  // selection first so the user doesn't accidentally lose their selection
+  // when scrolling through.
+  const [selectedVideoIds, setSelectedVideoIds] = useState<Set<Id<"videos">>>(
+    () => new Set(),
+  );
+  const [lastClickedVideoId, setLastClickedVideoId] = useState<Id<"videos"> | null>(
+    null,
+  );
+  const [selectionShareOpen, setSelectionShareOpen] = useState(false);
+
+  const clearSelection = useCallback(() => {
+    setSelectedVideoIds(new Set());
+    setLastClickedVideoId(null);
+  }, []);
+
+  // ESC clears the selection — quick exit when the user is done.
+  useEffect(() => {
+    if (selectedVideoIds.size === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") clearSelection();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedVideoIds.size, clearSelection]);
 
   const shouldCanonicalize =
     !!context && !context.isCanonical && pathname !== context.canonicalPath;
@@ -366,6 +416,45 @@ export default function ProjectPage({
     return filtered;
   }, [videos, search, sort]);
 
+  // Single source of truth for modifier-click selection. Cmd/Ctrl toggles
+  // a single item. Shift extends the range from the last clicked item.
+  // The order used for "range" is the current visual order in filteredVideos
+  // so the selection feels natural regardless of sort.
+  const handleSelectionToggle = useCallback(
+    (
+      videoId: Id<"videos">,
+      modifiers: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean },
+    ) => {
+      const orderedIds = filteredVideos?.map((v) => v._id) ?? [];
+
+      if (modifiers.shiftKey && lastClickedVideoId) {
+        const start = orderedIds.indexOf(lastClickedVideoId);
+        const end = orderedIds.indexOf(videoId);
+        if (start === -1 || end === -1) return;
+        const [lo, hi] = start <= end ? [start, end] : [end, start];
+        const range = orderedIds.slice(lo, hi + 1);
+        setSelectedVideoIds((prev) => {
+          const next = new Set(prev);
+          for (const id of range) next.add(id);
+          return next;
+        });
+        return;
+      }
+
+      setSelectedVideoIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(videoId)) {
+          next.delete(videoId);
+        } else {
+          next.add(videoId);
+        }
+        return next;
+      });
+      setLastClickedVideoId(videoId);
+    },
+    [filteredVideos, lastClickedVideoId],
+  );
+
   const filteredFolders = useMemo(() => {
     if (!folders) return folders;
     const q = search.trim().toLowerCase();
@@ -419,8 +508,48 @@ export default function ProjectPage({
           ? "draft"
           : "none";
 
+  const selectedVideoIdsArray = useMemo(
+    () => Array.from(selectedVideoIds),
+    [selectedVideoIds],
+  );
+
   return (
     <div className="h-full flex flex-col">
+      {/* Floating selection toolbar — surfaces only when the user has
+          multi-selected items. Drives the ad-hoc bundle share flow. */}
+      {selectedVideoIds.size > 0 ? (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] px-4 py-2.5 shadow-[4px_4px_0px_0px_var(--shadow-color)]">
+          <span className="font-mono text-xs uppercase tracking-wider">
+            {selectedVideoIds.size} selected
+          </span>
+          <button
+            type="button"
+            onClick={() => setSelectionShareOpen(true)}
+            className="px-3 py-1 border-2 border-[#f0f0e8] bg-[#FF6600] text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#9A3412]"
+          >
+            <LinkIcon className="inline h-3.5 w-3.5 mr-1" />
+            Share {selectedVideoIds.size}
+          </button>
+          <button
+            type="button"
+            onClick={clearSelection}
+            className="px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a]"
+          >
+            Cancel
+          </button>
+        </div>
+      ) : null}
+
+      <ShareSelectionDialog
+        videoIds={selectedVideoIdsArray}
+        defaultName={project?.name ? `${project.name} — selection` : undefined}
+        open={selectionShareOpen}
+        onOpenChange={(open) => {
+          setSelectionShareOpen(open);
+          if (!open) clearSelection();
+        }}
+      />
+
       {/* Header */}
       <DashboardHeader paths={[
         {
@@ -602,6 +731,10 @@ export default function ProjectPage({
                     videoId={video._id}
                     muxPlaybackId={video.muxPlaybackId}
                     draggable={canUpload}
+                    selected={selectedVideoIds.has(video._id)}
+                    onSelectToggle={(mods) =>
+                      handleSelectionToggle(video._id, mods)
+                    }
                     onOpen={() =>
                       navigate({
                         to: videoPath(resolvedTeamSlug, project._id, video._id),
@@ -783,6 +916,10 @@ export default function ProjectPage({
                   videoId={video._id}
                   muxPlaybackId={video.muxPlaybackId}
                   draggable={canUpload}
+                  selected={selectedVideoIds.has(video._id)}
+                  onSelectToggle={(mods) =>
+                    handleSelectionToggle(video._id, mods)
+                  }
                   onOpen={() =>
                     navigate({
                       to: videoPath(resolvedTeamSlug, project._id, video._id),
