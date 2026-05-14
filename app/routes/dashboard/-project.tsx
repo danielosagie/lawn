@@ -455,6 +455,11 @@ export default function ProjectPage({
     [filteredVideos, lastClickedVideoId],
   );
 
+  const selectedVideoIdsArray = useMemo(
+    () => Array.from(selectedVideoIds),
+    [selectedVideoIds],
+  );
+
   const filteredFolders = useMemo(() => {
     if (!folders) return folders;
     const q = search.trim().toLowerCase();
@@ -507,11 +512,6 @@ export default function ProjectPage({
         : project?.contract
           ? "draft"
           : "none";
-
-  const selectedVideoIdsArray = useMemo(
-    () => Array.from(selectedVideoIds),
-    [selectedVideoIds],
-  );
 
   return (
     <div className="h-full flex flex-col">

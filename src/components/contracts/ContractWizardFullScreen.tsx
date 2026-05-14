@@ -462,12 +462,12 @@ function Stepper({
           <div key={s.id} className="flex items-center gap-2 flex-1 min-w-0">
             <div
               className={cn(
-                "flex items-center justify-center w-6 h-6 text-[10px] font-bold border-2 border-[#1a1a1a] flex-shrink-0",
+                "flex items-center justify-center w-6 h-6 text-[10px] font-bold border-2 border-[var(--border)] flex-shrink-0",
                 isPast
                   ? "bg-[#FF6600] text-[#f0f0e8]"
                   : isCurrent
-                    ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                    : "bg-[#f0f0e8] text-[#888]",
+                    ? "bg-[var(--foreground)] text-[var(--background)]"
+                    : "bg-[var(--background)] text-[var(--foreground-muted)]",
               )}
             >
               {isPast ? <Check className="h-3 w-3" /> : i + 1}
@@ -475,13 +475,18 @@ function Stepper({
             <div
               className={cn(
                 "text-[10px] font-bold uppercase tracking-wider truncate hidden md:block",
-                isCurrent ? "text-[#1a1a1a]" : "text-[#888]",
+                isCurrent
+                  ? "text-[var(--foreground)]"
+                  : "text-[var(--foreground-muted)]",
               )}
             >
               {s.label}
             </div>
             {i < stages.length - 1 ? (
-              <div className="flex-1 h-[2px] bg-[#1a1a1a]/20 relative overflow-hidden">
+              // Use the foreground token at 30% so the track reads on both
+              // the forced-light wizard backdrop AND any future theme-
+              // respecting variant. Bumped from /20 → /30 for visibility.
+              <div className="flex-1 h-[2px] bg-[var(--foreground)]/30 relative overflow-hidden">
                 {isCurrent ? (
                   <div
                     className="absolute inset-y-0 left-0 bg-[#FF6600] transition-all"

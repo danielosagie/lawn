@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useParams } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useAction, useConvex, useMutation, useQuery } from "convex/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Y from "yjs";
@@ -78,6 +78,32 @@ function ContractFullPage() {
     teamSlug: string;
     projectId: string;
   };
+  const navigate = useNavigate();
+
+  // ESC bails out of the contract editor back to the project page. Autosave
+  // handles in-flight edits so dropping out mid-typing won't lose work.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const target = e.target as HTMLElement | null;
+      // Don't intercept ESC while the user is typing in an editor or
+      // dismissing a nested popover — bail out only on "ambient" ESC.
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      void navigate({
+        to: projectPath(teamSlug, projectId as Id<"projects">),
+      });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navigate, teamSlug, projectId]);
 
   const convexClient = useConvex();
   const project = useQuery(api.projects.get, {

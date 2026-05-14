@@ -222,14 +222,14 @@ function Stepper({ step, hasType }: { step: Step; hasType: boolean }) {
           <div key={s.id} className="flex items-center gap-2 flex-1">
             <div
               className={
-                "flex items-center justify-center w-6 h-6 text-[10px] font-bold border-2 border-[#1a1a1a] " +
+                "flex items-center justify-center w-6 h-6 text-[10px] font-bold border-2 border-[var(--border)] " +
                 (isPast
                   ? "bg-[#FF6600] text-[#f0f0e8]"
                   : isCurrent
-                    ? "bg-[#1a1a1a] text-[#f0f0e8]"
+                    ? "bg-[var(--foreground)] text-[var(--background)]"
                     : reachable
-                      ? "bg-[#f0f0e8] text-[#1a1a1a]"
-                      : "bg-[#e8e8e0] text-[#888]")
+                      ? "bg-[var(--background)] text-[var(--foreground)]"
+                      : "bg-[var(--surface-alt)] text-[var(--foreground-muted)]")
               }
             >
               {isPast ? <Check className="h-3 w-3" /> : i + 1}
@@ -237,13 +237,18 @@ function Stepper({ step, hasType }: { step: Step; hasType: boolean }) {
             <div
               className={
                 "text-[10px] font-bold uppercase tracking-wider truncate " +
-                (isCurrent ? "text-[#1a1a1a]" : "text-[#888]")
+                (isCurrent
+                  ? "text-[var(--foreground)]"
+                  : "text-[var(--foreground-muted)]")
               }
             >
               {s.label}
             </div>
             {i < steps.length - 1 ? (
-              <div className="flex-1 h-[2px] bg-[#1a1a1a]/30" />
+              // Track sits on whatever theme background the Dialog uses;
+              // use the foreground token at 30% so it stays visible against
+              // both cream and dark surfaces.
+              <div className="flex-1 h-[2px] bg-[var(--foreground)]/30" />
             ) : null}
           </div>
         );
