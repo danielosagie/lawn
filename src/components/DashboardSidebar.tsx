@@ -6,6 +6,7 @@ import { useQuery } from "convex/react";
 import {
   ChevronsUpDown,
   CreditCard,
+  HardDrive,
   Moon,
   Plus,
   Settings,
@@ -213,11 +214,27 @@ export function DashboardSidebar() {
           </SidebarLink>
         </nav>
 
+        {/* Desktop app download — separated section above the New project
+            button. Sits in its own div so it reads as "tooling you can
+            install" rather than another nav item or a peer of project
+            creation. The link is a placeholder until the GitHub Action
+            uploads a real DMG to /downloads/. */}
+        <div className="px-3 pt-3 pb-1 border-t-2 border-[#1a1a1a]">
+          <a
+            href="/downloads/snip-desktop.dmg"
+            className="w-full flex items-center justify-center gap-2 px-2 py-2 border-2 border-[#1a1a1a] text-xs font-bold uppercase tracking-wider text-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#FF6600] hover:text-[#f0f0e8] transition-colors"
+            title="Download snip Desktop for macOS — mount your bucket as a local drive"
+          >
+            <HardDrive className="h-3.5 w-3.5" />
+            Desktop app · DMG
+          </a>
+        </div>
+
         {/* "+ New project" sits directly above the account section,
             below the project list but visually separated. This makes
             the primary creation action easy to spot without burying
             it next to the avatar. */}
-        <div className="px-3 pt-3 pb-3 border-t-2 border-[#1a1a1a]">
+        <div className="px-3 pt-2 pb-3">
           <button
             type="button"
             onClick={() => setCreateProjectOpen(true)}
