@@ -33,7 +33,14 @@ export async function cleanupExpiredShareAccessGrantsForLink(
 export async function issueShareAccessGrant(
   ctx: MutationCtx,
   shareLinkId: Id<"shareLinks">,
-  ttlMs = SHARE_ACCESS_GRANT_TTL_MS,
+  ttlMs: number = SHARE_ACCESS_GRANT_TTL_MS,
+  forensics?: {
+    viewerClerkId?: string;
+    viewerEmail?: string;
+    viewerIpHash?: string;
+    viewerUserAgent?: string;
+    viewerReferrer?: string;
+  },
 ) {
   await cleanupExpiredShareAccessGrantsForLink(ctx, shareLinkId);
 
@@ -53,6 +60,11 @@ export async function issueShareAccessGrant(
     token,
     createdAt: now,
     expiresAt: now + ttlMs,
+    viewerClerkId: forensics?.viewerClerkId,
+    viewerEmail: forensics?.viewerEmail,
+    viewerIpHash: forensics?.viewerIpHash,
+    viewerUserAgent: forensics?.viewerUserAgent,
+    viewerReferrer: forensics?.viewerReferrer,
   });
 
   return token;

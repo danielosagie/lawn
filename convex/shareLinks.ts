@@ -105,6 +105,28 @@ function sanitizePaywallInput(
   };
 }
 
+/**
+ * Paywalled share links must carry a recipient identifier — that's the
+ * label burned into the watermarked preview. Without it the burn-in falls
+ * back to a token-prefix that's useless for leak attribution. We accept
+ * EITHER clientEmail (preferred — Stripe Checkout also pre-fills it) OR a
+ * free-form clientLabel for cases where the agency only has a name.
+ */
+function requireRecipientIdentityForPaywall(
+  paywall: { priceCents: number } | undefined,
+  clientEmail: string | undefined,
+  clientLabel: string | undefined,
+) {
+  if (!paywall) return;
+  const email = clientEmail?.trim();
+  const label = clientLabel?.trim();
+  if (!email && !label) {
+    throw new Error(
+      "Paywalled share links require a client email or label so the watermark + checkout know who they're for.",
+    );
+  }
+}
+
 export const create = mutation({
   args: {
     // Exactly one of these must be set. Validated below — Convex args don't
@@ -152,6 +174,11 @@ export const create = mutation({
       ? await hashPassword(normalizedPassword)
       : undefined;
     const paywall = sanitizePaywallInput(args.paywall);
+    requireRecipientIdentityForPaywall(
+      paywall,
+      args.clientEmail,
+      args.clientLabel,
+    );
 
     const shareLinkId = await ctx.db.insert("shareLinks", {
       videoId: args.videoId,
@@ -354,6 +381,14 @@ export const issueAccessGrant = mutation({
   args: {
     token: v.string(),
     password: v.optional(v.string()),
+    // Forensic capture for leak attribution. The share page proxies the
+    // viewer's IP from the request edge (already hashed client-side or by
+    // a downstream edge function — we never store raw IPs) and UA. None of
+    // these are required to issue the grant; we want anonymous viewers to
+    // still be able to pay and view.
+    viewerIpHash: v.optional(v.string()),
+    viewerUserAgent: v.optional(v.string()),
+    viewerReferrer: v.optional(v.string()),
   },
   returns: v.object({
     ok: v.boolean(),
@@ -446,7 +481,22 @@ export const issueAccessGrant = mutation({
       }
     }
 
-    const grantToken = await issueShareAccessGrant(ctx, link._id);
+    // Capture viewer identity for leak forensics. Clerk identity (if any)
+    // comes from the Convex auth context — that's the most reliable signal
+    // when a recipient is signed in. The IP hash + UA + referrer are caller-
+    // provided since the V8 isolate doesn't see request headers directly.
+    const identity = await ctx.auth.getUserIdentity();
+    const viewerEmail =
+      typeof identity?.email === "string" && identity.email.length > 0
+        ? identity.email
+        : undefined;
+    const grantToken = await issueShareAccessGrant(ctx, link._id, undefined, {
+      viewerClerkId: identity?.subject,
+      viewerEmail,
+      viewerIpHash: args.viewerIpHash?.trim() || undefined,
+      viewerUserAgent: args.viewerUserAgent?.slice(0, 512) || undefined,
+      viewerReferrer: args.viewerReferrer?.slice(0, 512) || undefined,
+    });
 
     await ctx.db.patch(link._id, {
       viewCount: link.viewCount + 1,

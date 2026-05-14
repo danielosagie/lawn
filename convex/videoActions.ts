@@ -861,10 +861,15 @@ export const getSharedPaywalledPlayback = action({
 
     // Demo bypass: paywall set but no signed-playback keys. Fall back to
     // the public playback URL so the share page is testable end-to-end.
-    // The unlock state still flips correctly on simulated payment; the
-    // only thing missing vs. production is the burned-in watermark on the
-    // preview asset.
+    // This is GATED behind explicit DEMO_MODE so a misconfigured prod
+    // deployment (missing MUX_SIGNING_KEY/MUX_PRIVATE_KEY) can't silently
+    // serve full-res to unpaid viewers — refuse loudly instead.
     if (!isFeatureEnabled("muxSignedPlayback")) {
+      if (!isFeatureEnabled("demoMode")) {
+        throw new Error(
+          "Paywalled playback requires Mux signed playback keys. Set MUX_SIGNING_KEY + MUX_PRIVATE_KEY, or set DEMO_MODE=1 to allow unsigned previews.",
+        );
+      }
       const playbackId = video.muxPlaybackId;
       return {
         mode: paid ? ("full" as const) : ("preview" as const),

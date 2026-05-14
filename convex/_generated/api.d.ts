@@ -21,6 +21,7 @@ import type * as contracts from "../contracts.js";
 import type * as demoSeed from "../demoSeed.js";
 import type * as featureFlags from "../featureFlags.js";
 import type * as folders from "../folders.js";
+import type * as forensics from "../forensics.js";
 import type * as http from "../http.js";
 import type * as imagePreview from "../imagePreview.js";
 import type * as mux from "../mux.js";
@@ -66,6 +67,7 @@ declare const fullApi: ApiFromModules<{
   demoSeed: typeof demoSeed;
   featureFlags: typeof featureFlags;
   folders: typeof folders;
+  forensics: typeof forensics;
   http: typeof http;
   imagePreview: typeof imagePreview;
   mux: typeof mux;

@@ -377,9 +377,23 @@ export default defineSchema({
     // the payments row so refunds can revoke access by clearing paidAt.
     paidAt: v.optional(v.number()),
     paymentId: v.optional(v.id("payments")),
+    // Forensic capture for leak attribution. Set on grant issuance from the
+    // signed-in identity + request headers proxied by the share page. None of
+    // these are required (anonymous viewer with privacy extensions still gets
+    // a grant) but together they're enough to answer "which of these five
+    // recipients leaked this clip?" when the burned-in watermark only shows
+    // a per-link label. viewerIpHash uses sha256(ip + dailySalt) so we keep
+    // the privacy boundary (no raw IPs at rest) while still being able to
+    // group repeated views from the same client.
+    viewerClerkId: v.optional(v.string()),
+    viewerEmail: v.optional(v.string()),
+    viewerIpHash: v.optional(v.string()),
+    viewerUserAgent: v.optional(v.string()),
+    viewerReferrer: v.optional(v.string()),
   })
     .index("by_token", ["token"])
-    .index("by_share_link", ["shareLinkId"]),
+    .index("by_share_link", ["shareLinkId"])
+    .index("by_viewer_email", ["viewerEmail"]),
 
   // Per-transaction payment records. One row per Stripe Checkout Session.
   // Either shareLinkId (share-link paywall) OR videoId-only (Canva-style
