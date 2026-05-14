@@ -1,0 +1,141 @@
+name: Build snip Desktop DMG
+
+# Builds the macOS DMG for the desktop sync + mount companion. Runs on
+# pushes that touch the desktop/ tree (or this workflow), publishes
+# artifacts on every run, and attaches the DMGs to a GitHub Release when
+# a `desktop-v*` tag lands.
+#
+# Code signing + notarization are gated behind repository secrets — if
+# they're absent the workflow still produces an unsigned DMG so we can
+# smoke-test the build pipeline without an Apple Developer account.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop-dmg.yml"
+  pull_request:
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop-dmg.yml"
+  workflow_dispatch:
+  release:
+    types: [created]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.arch }})
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache Electron download
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/electron
+          key: ${{ runner.os }}-electron-${{ hashFiles('desktop/package.json') }}
+
+      - name: Cache Electron Builder
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/electron-builder
+          key: ${{ runner.os }}-electron-builder-${{ hashFiles('desktop/package.json') }}
+
+      - name: Install desktop deps
+        working-directory: desktop
+        run: bun install --frozen-lockfile
+
+      - name: Build renderer
+        working-directory: desktop
+        run: bun run build:renderer
+
+      - name: Build DMG (${{ matrix.arch }})
+        working-directory: desktop
+        env:
+          # Code signing — leave unset to produce an unsigned DMG. The
+          # workflow exits 0 either way; the next step uploads whatever
+          # was produced.
+          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bunx electron-builder --mac dmg --${{ matrix.arch }}
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: snip-desktop-${{ matrix.arch }}
+          path: |
+            desktop/release/*.dmg
+            desktop/release/*.dmg.blockmap
+          if-no-files-found: error
+
+      - name: Attach to GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            desktop/release/*.dmg
+            desktop/release/*.dmg.blockmap
+
+  # Republish the latest main-branch DMG to the web app's /public/downloads
+  # tree so the in-app "Download" buttons resolve to a real file. Only
+  # runs on push-to-main and pulls the just-built arm64 artifact (universal
+  # would be nicer but doubles build time; arm64 covers Apple Silicon, which
+  # is most snip users).
+  publish-web:
+    name: Publish to web /downloads
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download arm64 DMG
+        uses: actions/download-artifact@v4
+        with:
+          name: snip-desktop-arm64
+          path: desktop-dmg
+
+      - name: Copy DMG into public/downloads
+        run: |
+          mkdir -p public/downloads
+          dmg="$(ls desktop-dmg/*.dmg | head -n1)"
+          if [[ -z "$dmg" ]]; then
+            echo "No DMG produced — skipping publish."
+            exit 0
+          fi
+          cp "$dmg" public/downloads/snip-desktop.dmg
+          # Keep a versioned filename next to the canonical "latest" one
+          # so historical downloads are still reachable via git history.
+          cp "$dmg" "public/downloads/$(basename "$dmg")"
+
+      - name: Commit + push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/downloads
+          if git diff --cached --quiet; then
+            echo "No DMG changes — nothing to commit."
+            exit 0
+          fi
+          git commit -m "ci: publish snip Desktop DMG ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+          git push
