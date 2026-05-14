@@ -1,14 +1,25 @@
 import { useState, useEffect } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useUser } from "@clerk/tanstack-react-start";
 import { MarketingFooter } from "@/components/MarketingFooter";
 import { Apple } from "lucide-react";
 
 export default function Homepage() {
   const [scrolled, setScrolled] = useState(false);
-  const { user, isSignedIn } = useUser();
+  const { user, isSignedIn, isLoaded } = useUser();
+  const navigate = useNavigate();
   const greeting =
     user?.firstName || user?.primaryEmailAddress?.emailAddress?.split("@")[0] || "Account";
+
+  // Authed users skip the marketing page entirely. The landing page is for
+  // acquisition; once you have an active session, "Home" is the app.
+  // Bounce to /dashboard as soon as we know auth state — `isLoaded` gates
+  // out the flicker where useUser starts undefined on hydration.
+  useEffect(() => {
+    if (isLoaded && isSignedIn) {
+      void navigate({ to: "/dashboard", replace: true });
+    }
+  }, [isLoaded, isSignedIn, navigate]);
 
   useEffect(() => {
     const handleScroll = () => {
