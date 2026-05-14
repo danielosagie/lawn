@@ -605,7 +605,10 @@ export const getPublicDownloadUrl = action({
 });
 
 export const getSharedDownloadUrl = action({
-  args: { grantToken: v.string() },
+  args: {
+    grantToken: v.string(),
+    itemVideoId: v.optional(v.id("videos")),
+  },
   returns: v.object({
     url: v.string(),
     filename: v.string(),
@@ -613,6 +616,7 @@ export const getSharedDownloadUrl = action({
   handler: async (ctx, args): Promise<{ url: string; filename: string }> => {
     const result = await ctx.runQuery(api.videos.getByShareGrantForDownload, {
       grantToken: args.grantToken,
+      itemVideoId: args.itemVideoId,
     });
 
     if (!result?.video) {
@@ -657,14 +661,152 @@ export const getSharedDownloadUrl = action({
 });
 
 /**
+ * Image variant of getSharedPaywalledPlayback. For image/gif items the share
+ * page asks for a short-TTL signed URL — to the watermarked preview if the
+ * grant hasn't paid yet, to the original if it has. Lazy-triggers the sharp
+ * watermark gen the first time the item is viewed.
+ */
+export const getSharedImagePreview = action({
+  args: {
+    grantToken: v.string(),
+    itemVideoId: v.optional(v.id("videos")),
+  },
+  returns: v.object({
+    mode: v.union(
+      v.literal("preview"),
+      v.literal("preview_pending"),
+      v.literal("full"),
+      v.literal("public"),
+      v.literal("unsupported"),
+    ),
+    url: v.string(),
+    contentType: v.union(v.string(), v.null()),
+    tokenExpiresAt: v.union(v.number(), v.null()),
+    paywall: v.union(
+      v.object({
+        priceCents: v.number(),
+        currency: v.string(),
+        description: v.optional(v.string()),
+      }),
+      v.null(),
+    ),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    mode: "preview" | "preview_pending" | "full" | "public" | "unsupported";
+    url: string;
+    contentType: string | null;
+    tokenExpiresAt: number | null;
+    paywall: { priceCents: number; currency: string; description?: string } | null;
+  }> => {
+    const resolved = await ctx.runQuery(api.videos.getByShareGrantWithPaywall, {
+      grantToken: args.grantToken,
+      itemVideoId: args.itemVideoId,
+    });
+    if (!resolved) throw new Error("Share grant invalid or expired.");
+    const { video, shareLink, grant } = resolved;
+
+    const contentType = video.contentType ?? null;
+    if (!contentType || !contentType.startsWith("image/")) {
+      return {
+        mode: "unsupported" as const,
+        url: "",
+        contentType,
+        tokenExpiresAt: null,
+        paywall: shareLink.paywall,
+      };
+    }
+    if (!video.s3Key) {
+      throw new Error("Original file missing from bucket.");
+    }
+
+    const TTL_SECONDS = 300;
+    const paid = Boolean(grant.paidAt);
+
+    // No paywall — hand over the original directly.
+    if (!shareLink.paywall) {
+      return {
+        mode: "public" as const,
+        url: await buildSignedBucketObjectUrl(video.s3Key, {
+          expiresIn: TTL_SECONDS,
+        }),
+        contentType,
+        tokenExpiresAt: Date.now() + TTL_SECONDS * 1000,
+        paywall: null,
+      };
+    }
+
+    if (paid) {
+      return {
+        mode: "full" as const,
+        url: await buildSignedBucketObjectUrl(video.s3Key, {
+          expiresIn: TTL_SECONDS,
+        }),
+        contentType,
+        tokenExpiresAt: Date.now() + TTL_SECONDS * 1000,
+        paywall: shareLink.paywall,
+      };
+    }
+
+    // Pre-payment: serve the sharp-rendered watermarked preview if ready.
+    // Otherwise lazy-trigger gen and return a pending placeholder.
+    if (!video.imagePreviewS3Key || video.imagePreviewStatus !== "ready") {
+      if (video.imagePreviewStatus !== "pending") {
+        await ctx.scheduler.runAfter(
+          0,
+          internal.imagePreview.generateForVideoItem,
+          {
+            videoId: video._id,
+            shareLinkId: shareLink._id,
+            primaryLabel:
+              shareLink.clientEmail ??
+              shareLink.clientLabel ??
+              `share/${shareLink._id.toString().slice(-8)}`,
+            secondaryLabel: "PREVIEW — DO NOT REDISTRIBUTE",
+          },
+        );
+      }
+      return {
+        mode: "preview_pending" as const,
+        url: "",
+        contentType,
+        tokenExpiresAt: null,
+        paywall: shareLink.paywall,
+      };
+    }
+
+    return {
+      mode: "preview" as const,
+      url: await buildSignedBucketObjectUrl(video.imagePreviewS3Key, {
+        expiresIn: TTL_SECONDS,
+        contentType: "image/webp",
+      }),
+      contentType: "image/webp",
+      tokenExpiresAt: Date.now() + TTL_SECONDS * 1000,
+      paywall: shareLink.paywall,
+    };
+  },
+});
+
+/**
  * Shared playback for paywalled share links. Returns the watermarked 360p
  * preview before payment and the full-res signed stream after. Always uses
  * JWT-signed playback IDs with short TTL — the URL alone is not enough.
  */
 export const getSharedPaywalledPlayback = action({
-  args: { grantToken: v.string() },
+  args: {
+    grantToken: v.string(),
+    itemVideoId: v.optional(v.id("videos")),
+  },
   returns: v.object({
-    mode: v.union(v.literal("preview"), v.literal("full"), v.literal("public")),
+    mode: v.union(
+      v.literal("preview"),
+      v.literal("preview_pending"),
+      v.literal("full"),
+      v.literal("public"),
+    ),
     url: v.string(),
     posterUrl: v.string(),
     tokenExpiresAt: v.union(v.number(), v.null()),
@@ -681,7 +823,7 @@ export const getSharedPaywalledPlayback = action({
     ctx,
     args,
   ): Promise<{
-    mode: "preview" | "full" | "public";
+    mode: "preview" | "preview_pending" | "full" | "public";
     url: string;
     posterUrl: string;
     tokenExpiresAt: number | null;
@@ -689,6 +831,7 @@ export const getSharedPaywalledPlayback = action({
   }> => {
     const resolved = await ctx.runQuery(api.videos.getByShareGrantWithPaywall, {
       grantToken: args.grantToken,
+      itemVideoId: args.itemVideoId,
     });
     if (!resolved) throw new Error("Share grant invalid or expired.");
     const { video, shareLink, grant } = resolved;
@@ -757,9 +900,29 @@ export const getSharedPaywalledPlayback = action({
       };
     }
 
-    // Preview — watermarked 360p signed asset.
+    // Preview — watermarked 360p signed asset. If it hasn't finished ingesting
+    // yet, return a "pending" mode so the share page can still render the
+    // paywall CTA + a waiting state. Lazy-triggers preview gen for share
+    // links that pre-dated the auto-schedule on create, and for each item
+    // in a bundle share on its first view.
     if (!video.muxPreviewPlaybackId) {
-      throw new Error("Preview asset not ready yet. Try again shortly.");
+      if (!video.muxPreviewAssetId) {
+        await ctx.scheduler.runAfter(
+          0,
+          api.videoActions.ensurePreviewAssetForShareLink,
+          {
+            shareLinkId: shareLink._id,
+            itemVideoId: args.itemVideoId,
+          },
+        );
+      }
+      return {
+        mode: "preview_pending" as const,
+        url: "",
+        posterUrl: "",
+        tokenExpiresAt: null,
+        paywall: shareLink.paywall,
+      };
     }
     const videoToken = await signPlaybackToken(video.muxPreviewPlaybackId, `${TTL_SECONDS}s`);
     const thumbToken = await signThumbnailToken(video.muxPreviewPlaybackId, `${TTL_SECONDS}s`);
@@ -781,6 +944,12 @@ export const getSharedPaywalledPlayback = action({
 export const ensurePreviewAssetForShareLink = action({
   args: {
     shareLinkId: v.id("shareLinks"),
+    // For bundle share links the caller must pass the specific item video
+    // to generate a preview for. Omitted for single-video links — we use
+    // link.videoId. Bundle items share the same watermark label (the link's
+    // clientEmail/clientLabel) but each video gets its own Mux preview
+    // asset stored on its own row.
+    itemVideoId: v.optional(v.id("videos")),
   },
   returns: v.object({
     status: v.union(
@@ -810,8 +979,16 @@ export const ensurePreviewAssetForShareLink = action({
     });
     if (!link) throw new Error("Share link not found");
 
+    const targetVideoId = args.itemVideoId ?? link.videoId;
+    if (!targetVideoId) {
+      return {
+        status: "missingSourceVideo" as const,
+        reason: "Bundle share links require itemVideoId.",
+      };
+    }
+
     const video = await ctx.runQuery(api.videos.getForPreviewGen, {
-      videoId: link.videoId,
+      videoId: targetVideoId,
     });
     if (!video?.s3Key || !video.contentType) {
       return {

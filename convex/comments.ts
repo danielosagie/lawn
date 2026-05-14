@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query, MutationCtx, QueryCtx } from "./_generated/server";
+import { Doc, Id } from "./_generated/dataModel";
 import {
   identityAvatarUrl,
   identityName,
@@ -7,6 +8,28 @@ import {
   requireUser,
 } from "./auth";
 import { resolveActiveShareGrant } from "./shareAccess";
+import { resolveBundleVideos } from "./shareBundles";
+
+/**
+ * Resolves the video targeted by a share-grant comment. Single-video shares
+ * use the link's videoId; bundle shares require an itemVideoId that we
+ * validate is part of the bundle so a paid grant for bundle A can't
+ * spray comments onto videos in bundle B.
+ */
+async function resolveShareGrantVideo(
+  ctx: QueryCtx | MutationCtx,
+  shareLink: Doc<"shareLinks">,
+  itemVideoId: Id<"videos"> | undefined,
+): Promise<Doc<"videos"> | null> {
+  if (shareLink.videoId) {
+    return await ctx.db.get(shareLink.videoId);
+  }
+  if (!shareLink.bundleId || !itemVideoId) return null;
+  const bundle = await ctx.db.get(shareLink.bundleId);
+  if (!bundle) return null;
+  const items = await resolveBundleVideos(ctx, bundle);
+  return items.find((v) => v._id === itemVideoId) ?? null;
+}
 
 function toThreadedComments<T extends { _id: string; parentId?: string; timestampSeconds: number; _creationTime: number }>(
   comments: T[],
@@ -146,6 +169,9 @@ export const createForShareGrant = mutation({
     text: v.string(),
     timestampSeconds: v.number(),
     parentId: v.optional(v.id("comments")),
+    // Required when the share is a bundle so we know which item the comment
+    // attaches to. Ignored for single-video shares (we use the link's videoId).
+    itemVideoId: v.optional(v.id("videos")),
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
@@ -155,7 +181,7 @@ export const createForShareGrant = mutation({
       throw new Error("Invalid share grant");
     }
 
-    const video = await ctx.db.get(resolved.shareLink.videoId);
+    const video = await resolveShareGrantVideo(ctx, resolved.shareLink, args.itemVideoId);
     if (!video || video.status !== "ready") {
       throw new Error("Video not found");
     }
@@ -268,14 +294,17 @@ export const getThreadedForPublic = query({
 });
 
 export const getThreadedForShareGrant = query({
-  args: { grantToken: v.string() },
+  args: {
+    grantToken: v.string(),
+    itemVideoId: v.optional(v.id("videos")),
+  },
   handler: async (ctx, args) => {
     const resolved = await resolveActiveShareGrant(ctx, args.grantToken);
     if (!resolved) {
       return [];
     }
 
-    const video = await ctx.db.get(resolved.shareLink.videoId);
+    const video = await resolveShareGrantVideo(ctx, resolved.shareLink, args.itemVideoId);
     if (!video || video.status !== "ready") {
       return [];
     }

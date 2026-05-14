@@ -1,9 +1,9 @@
 import { MINUTE, RateLimiter } from "@convex-dev/rate-limiter";
 import { v } from "convex/values";
-import { components } from "./_generated/api";
+import { api, components } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
 import { internalQuery, mutation, query, MutationCtx } from "./_generated/server";
-import { identityName, requireVideoAccess } from "./auth";
+import { identityName, requireProjectAccess, requireVideoAccess } from "./auth";
 import { generateUniqueToken, hashPassword, verifyPassword } from "./security";
 import { findShareLinkByToken, issueShareAccessGrant } from "./shareAccess";
 
@@ -107,7 +107,10 @@ function sanitizePaywallInput(
 
 export const create = mutation({
   args: {
-    videoId: v.id("videos"),
+    // Exactly one of these must be set. Validated below — Convex args don't
+    // let us express XOR at the schema layer.
+    videoId: v.optional(v.id("videos")),
+    bundleId: v.optional(v.id("shareBundles")),
     expiresInDays: v.optional(v.number()),
     allowDownload: v.optional(v.boolean()),
     password: v.optional(v.string()),
@@ -122,7 +125,23 @@ export const create = mutation({
     clientEmail: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { user } = await requireVideoAccess(ctx, args.videoId, "member");
+    if (Boolean(args.videoId) === Boolean(args.bundleId)) {
+      throw new Error("Share link must reference exactly one of videoId or bundleId.");
+    }
+
+    let creatorSubject: string;
+    let creatorName: string;
+    if (args.videoId) {
+      const { user } = await requireVideoAccess(ctx, args.videoId, "member");
+      creatorSubject = user.subject;
+      creatorName = identityName(user);
+    } else {
+      const bundle = await ctx.db.get(args.bundleId!);
+      if (!bundle) throw new Error("Bundle not found");
+      const { user } = await requireProjectAccess(ctx, bundle.projectId, "member");
+      creatorSubject = user.subject;
+      creatorName = identityName(user);
+    }
 
     const token = await generateShareToken(ctx);
     const expiresAt = args.expiresInDays
@@ -134,11 +153,12 @@ export const create = mutation({
       : undefined;
     const paywall = sanitizePaywallInput(args.paywall);
 
-    await ctx.db.insert("shareLinks", {
+    const shareLinkId = await ctx.db.insert("shareLinks", {
       videoId: args.videoId,
+      bundleId: args.bundleId,
       token,
-      createdByClerkId: user.subject,
-      createdByName: identityName(user),
+      createdByClerkId: creatorSubject,
+      createdByName: creatorName,
       expiresAt,
       allowDownload: args.allowDownload ?? false,
       password: undefined,
@@ -150,6 +170,19 @@ export const create = mutation({
       clientLabel: args.clientLabel?.trim() || undefined,
       clientEmail: args.clientEmail?.trim() || undefined,
     });
+
+    // Paywalled links need a watermarked 360p preview asset before the first
+    // viewer arrives. For single-video links we kick off ingest immediately;
+    // for bundle links we defer to first-view per-item (each video in the
+    // bundle gets its own preview asset lazily) since live folders can have
+    // arbitrary contents.
+    if (paywall && args.videoId) {
+      await ctx.scheduler.runAfter(
+        0,
+        api.videoActions.ensurePreviewAssetForShareLink,
+        { shareLinkId },
+      );
+    }
 
     return { token };
   },
@@ -193,7 +226,15 @@ export const remove = mutation({
     const link = await ctx.db.get(args.linkId);
     if (!link) throw new Error("Share link not found");
 
-    await requireVideoAccess(ctx, link.videoId, "member");
+    if (link.videoId) {
+      await requireVideoAccess(ctx, link.videoId, "member");
+    } else if (link.bundleId) {
+      const bundle = await ctx.db.get(link.bundleId);
+      if (!bundle) throw new Error("Bundle not found");
+      await requireProjectAccess(ctx, bundle.projectId, "member");
+    } else {
+      throw new Error("Share link has no target");
+    }
 
     await deleteShareAccessGrantsForLink(ctx, args.linkId);
     await ctx.db.delete(args.linkId);
@@ -208,7 +249,8 @@ export const getInternal = internalQuery({
     if (!link) return null;
     return {
       _id: link._id,
-      videoId: link.videoId,
+      videoId: link.videoId ?? null,
+      bundleId: link.bundleId ?? null,
       token: link.token,
       paywall: link.paywall ?? null,
       clientEmail: link.clientEmail ?? null,
@@ -228,7 +270,15 @@ export const update = mutation({
     const link = await ctx.db.get(args.linkId);
     if (!link) throw new Error("Share link not found");
 
-    await requireVideoAccess(ctx, link.videoId, "member");
+    if (link.videoId) {
+      await requireVideoAccess(ctx, link.videoId, "member");
+    } else if (link.bundleId) {
+      const bundle = await ctx.db.get(link.bundleId);
+      if (!bundle) throw new Error("Bundle not found");
+      await requireProjectAccess(ctx, bundle.projectId, "member");
+    } else {
+      throw new Error("Share link has no target");
+    }
 
     const updates: Partial<Doc<"shareLinks">> = {};
 
@@ -275,8 +325,20 @@ export const getByToken = query({
       return { status: "expired" as const };
     }
 
-    const video = await ctx.db.get(link.videoId);
-    if (!video || video.status !== "ready") {
+    // Single-video links require the referenced video to be in the ready
+    // state. Bundle links are valid as long as the bundle row exists — the
+    // share page itself handles empty/in-progress items gracefully.
+    if (link.videoId) {
+      const video = await ctx.db.get(link.videoId);
+      if (!video || video.status !== "ready") {
+        return { status: "missing" as const };
+      }
+    } else if (link.bundleId) {
+      const bundle = await ctx.db.get(link.bundleId);
+      if (!bundle) {
+        return { status: "missing" as const };
+      }
+    } else {
       return { status: "missing" as const };
     }
 
@@ -322,8 +384,17 @@ export const issueAccessGrant = mutation({
       return { ok: false, grantToken: null };
     }
 
-    const video = await ctx.db.get(link.videoId);
-    if (!video || video.status !== "ready") {
+    if (link.videoId) {
+      const video = await ctx.db.get(link.videoId);
+      if (!video || video.status !== "ready") {
+        return { ok: false, grantToken: null };
+      }
+    } else if (link.bundleId) {
+      const bundle = await ctx.db.get(link.bundleId);
+      if (!bundle) {
+        return { ok: false, grantToken: null };
+      }
+    } else {
       return { ok: false, grantToken: null };
     }
 

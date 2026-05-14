@@ -312,31 +312,49 @@ async function startMount({ mountPath } = {}) {
     RCLONE_CONFIG_VIDEOINFRA_ACL: "private",
   };
 
-  // VFS tuned for large sequential reads (NLE bins, playback) — closer to how
-  // dedicated cloud-NAS clients behave than default tiny read-aheads. Keep in
-  // sync with docs/MOUNTING.md + desktop Settings “Mount command” preview.
+  // VFS tuned for LucidLink-style streaming on NLE workloads:
+  //  • vfs-cache-mode full   — cache read blocks on disk so revisits are local
+  //  • multi-thread-streams  — parallel range reads on big files (the single
+  //                            biggest win over default rclone for video)
+  //  • aggressive read-ahead — seekers + playheads stay ahead of the decoder
+  //  • long dir cache        — Resolve/Premiere rescan bins constantly
+  //  • fast fingerprint      — skip slow per-file ETag checks on cache hits
+  //
+  // We still tell rclone to prefer mmap and disable mtime metadata pulls
+  // since they're a hot path for finder/Resolve listings. The whole stanza
+  // mirrors docs/MOUNTING.md + the Settings “Mount command” preview so
+  // editors can copy/paste it for ad-hoc terminal mounts.
   const args = [
     "mount",
     `videoinfra:${s.bucket}/projects`,
     targetPath,
-    "--vfs-cache-mode",
-    "writes",
-    "--vfs-cache-max-size",
-    "50G",
-    "--vfs-write-back",
-    "5s",
-    "--vfs-read-ahead",
-    "128M",
-    "--vfs-read-chunk-size",
-    "32M",
-    "--buffer-size",
-    "32M",
-    "--dir-cache-time",
-    "60s",
-    "--transfers",
-    "4",
-    "--allow-other=false",
+    // Cache strategy
+    "--vfs-cache-mode", "full",
+    "--vfs-cache-max-size", "100G",
+    "--vfs-cache-max-age", "720h",
+    "--vfs-cache-min-free-space", "10G",
+    "--vfs-fast-fingerprint",
+    "--vfs-write-back", "5s",
+    // Read tuning
+    "--vfs-read-ahead", "256M",
+    "--vfs-read-chunk-size", "32M",
+    "--vfs-read-chunk-size-limit", "512M",
+    "--buffer-size", "64M",
+    "--multi-thread-streams", "8",
+    "--multi-thread-cutoff", "100M",
+    // Dir + listing tuning
+    "--dir-cache-time", "5m",
+    "--poll-interval", "30s",
     "--no-modtime",
+    "--no-checksum",
+    // Resilience
+    "--low-level-retries", "10",
+    "--retries", "3",
+    "--timeout", "5m",
+    // Misc
+    "--transfers", "8",
+    "--use-mmap",
+    "--allow-other=false",
     "-vv",
   ];
 

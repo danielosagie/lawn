@@ -39,13 +39,42 @@ export const lookupGrantForCheckout = internalQuery({
     if (!grant || grant.expiresAt <= Date.now()) return null;
     const shareLink = await ctx.db.get(grant.shareLinkId);
     if (!shareLink) return null;
-    const video = await ctx.db.get(shareLink.videoId);
+
+    // For bundle links we need a representative video so the existing
+    // payments-row shape (payments.videoId required) keeps working. We use
+    // the first non-deleted item in the bundle. All bundle items share a
+    // project + team by construction, so the team lookup downstream stays
+    // valid regardless of which item we pick.
+    let video: Awaited<ReturnType<typeof ctx.db.get<"videos">>> | null = null;
+    let bundleName: string | null = null;
+    if (shareLink.videoId) {
+      video = await ctx.db.get(shareLink.videoId);
+    } else if (shareLink.bundleId) {
+      const bundle = await ctx.db.get(shareLink.bundleId);
+      if (bundle) {
+        bundleName = bundle.name;
+        const items =
+          bundle.kind === "folder"
+            ? bundle.folderId
+              ? await ctx.db
+                  .query("videos")
+                  .withIndex("by_folder", (q) => q.eq("folderId", bundle.folderId))
+                  .collect()
+              : []
+            : await Promise.all((bundle.videoIds ?? []).map((id) => ctx.db.get(id)));
+        const firstReady = items.find(
+          (v): v is NonNullable<typeof v> => Boolean(v && !v.deletedAt),
+        );
+        video = firstReady ?? null;
+      }
+    }
     if (!video) return null;
+
     const project = await ctx.db.get(video.projectId);
     if (!project) return null;
     const team = await ctx.db.get(project.teamId);
     if (!team) return null;
-    return { grant, shareLink, video, project, team };
+    return { grant, shareLink, video, project, team, bundleName };
   },
 });
 

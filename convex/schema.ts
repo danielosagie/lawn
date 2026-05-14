@@ -227,6 +227,18 @@ export default defineSchema({
       )
     ),
     watermarkOverlayKey: v.optional(v.string()),
+    // Image-class items (jpg/png/webp/gif) skip Mux and get a sharp-rendered
+    // watermarked low-res preview instead. Same gating semantics as the video
+    // preview asset: served pre-payment, swapped for the original on paid
+    // grants. Stored as an S3 key so we can issue signed URLs with short TTL.
+    imagePreviewS3Key: v.optional(v.string()),
+    imagePreviewStatus: v.optional(
+      v.union(
+        v.literal("pending"),
+        v.literal("ready"),
+        v.literal("errored"),
+      ),
+    ),
     // Canva-style per-video paywall. Optional. When set, the Download
     // button on the video itself (dashboard player, share page) becomes a
     // "Download — $X" checkout. shareLinks can still ALSO have their own
@@ -300,8 +312,33 @@ export default defineSchema({
     .index("by_video_and_timestamp", ["videoId", "timestampSeconds"])
     .index("by_parent", ["parentId"]),
 
+  // Bundles let a single share link cover multiple items at once with one
+  // paywall and one grant. Two kinds:
+  //   • folder    — live: resolves to the current contents of folderId. New
+  //                 uploads to that folder appear in the share automatically.
+  //                 Deletions disappear.
+  //   • selection — frozen snapshot of a specific list of videoIds. Used
+  //                 when sharing an ad-hoc multi-select from the grid.
+  shareBundles: defineTable({
+    projectId: v.id("projects"),
+    name: v.string(),
+    kind: v.union(v.literal("folder"), v.literal("selection")),
+    folderId: v.optional(v.id("folders")),
+    videoIds: v.optional(v.array(v.id("videos"))),
+    createdByClerkId: v.string(),
+    createdByName: v.string(),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_folder", ["folderId"]),
+
+  // A share link points to EITHER a single videoId OR a bundleId — exactly
+  // one is set. The two-shape pattern keeps the single-video path simple and
+  // unchanged for legacy data. The grant + paywall mechanics are identical
+  // for both shapes; the difference is whether the share page renders a
+  // single-player view or a folder-style index.
   shareLinks: defineTable({
-    videoId: v.id("videos"),
+    videoId: v.optional(v.id("videos")),
+    bundleId: v.optional(v.id("shareBundles")),
     token: v.string(),
     createdByClerkId: v.string(),
     createdByName: v.string(),
@@ -327,7 +364,8 @@ export default defineSchema({
     clientEmail: v.optional(v.string()),
   })
     .index("by_token", ["token"])
-    .index("by_video", ["videoId"]),
+    .index("by_video", ["videoId"])
+    .index("by_bundle", ["bundleId"]),
 
   shareAccessGrants: defineTable({
     shareLinkId: v.id("shareLinks"),

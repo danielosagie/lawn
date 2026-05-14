@@ -44,12 +44,25 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
   const shareLinks = useQuery(api.shareLinks.list, { videoId });
   const featureStatus = useQuery(api.featureFlags.getFeatureStatus, {});
   const createShareLink = useMutation(api.shareLinks.create);
+  const createBundleForFolder = useMutation(api.shareBundles.createForFolder);
   const deleteShareLink = useMutation(api.shareLinks.remove);
   const setVisibility = useMutation(api.videos.setVisibility);
   const ensurePreviewAsset = useAction(
     api.videoActions.ensurePreviewAssetForShareLink,
   );
 
+  // When the video sits inside a folder we offer a "share entire folder"
+  // toggle. The dialog still scopes per-video by default — bundle sharing
+  // is opt-in to avoid surprise paywall scope changes.
+  const folderBreadcrumbs = useQuery(
+    api.folders.breadcrumbs,
+    video?.folderId ? { folderId: video.folderId } : "skip",
+  );
+  const containingFolder = folderBreadcrumbs?.length
+    ? folderBreadcrumbs[folderBreadcrumbs.length - 1]
+    : null;
+
+  const [scope, setScope] = useState<"video" | "folder">("video");
   const [isCreating, setIsCreating] = useState(false);
   const [isUpdatingVisibility, setIsUpdatingVisibility] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -91,18 +104,28 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
     }
     setIsCreating(true);
     try {
+      // When the user picks "folder" scope, we first materialize a folder
+      // bundle row, then create a share link pointing at it. Bundle creation
+      // is idempotent in semantics but not in storage — a fresh bundle row
+      // per share lets us track who shared the folder when.
+      let bundleId: Id<"shareBundles"> | undefined;
+      if (scope === "folder" && video?.folderId) {
+        bundleId = await createBundleForFolder({ folderId: video.folderId });
+      }
+
       const created = await createShareLink({
-        videoId,
+        videoId: scope === "video" ? videoId : undefined,
+        bundleId,
         expiresInDays: newLinkOptions.expiresInDays,
         allowDownload,
         password: newLinkOptions.password,
         paywall: paywallArg,
         clientEmail: newLinkOptions.clientEmail || undefined,
       });
-      if (paywallArg && shareLinks) {
-        // Find the just-created link to kick off preview generation.
-        // We have the token; find by token via next render — simplest path is
-        // to look it up after-the-fact. The list query refreshes reactively.
+      // For single-video paywalled links we kick off preview generation
+      // immediately. Bundle links generate per-item previews lazily on
+      // first view because a live folder's contents aren't known yet.
+      if (paywallArg && scope === "video" && shareLinks) {
         const newLink = shareLinks.find((l) => l.token === created.token);
         if (newLink) {
           void ensurePreviewAsset({ shareLinkId: newLink._id });
@@ -167,7 +190,7 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto flex flex-col gap-3">
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto flex flex-col gap-4">
         <DialogHeader className="flex-shrink-0">
           <DialogTitle>Share</DialogTitle>
         </DialogHeader>
@@ -243,17 +266,56 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
             dialog stays single-purpose. */}
         {video?.visibility === "private" ? (
         <>
-        <details className="space-y-4 border-2 border-[#1a1a1a] p-4 bg-[#e8e8e0] [&_summary]:cursor-pointer" open>
-          <summary className="font-bold text-sm text-[#1a1a1a]">
+        <section className="border-2 border-[#1a1a1a] p-5 bg-[#e8e8e0] space-y-5">
+          <h3 className="font-bold text-sm text-[#1a1a1a] uppercase tracking-wider">
             New link
-          </summary>
-          <div className="pt-2">
+          </h3>
 
-          <div>
-            <label className="text-sm text-[#888]">Expiration</label>
+          {containingFolder ? (
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold uppercase tracking-wider text-[#888]">
+                What to share
+              </label>
+              <div className="flex border-2 border-[#1a1a1a]">
+                <button
+                  type="button"
+                  onClick={() => setScope("video")}
+                  className={`flex-1 px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors ${
+                    scope === "video"
+                      ? "bg-[#1a1a1a] text-[#f0f0e8]"
+                      : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0]"
+                  }`}
+                >
+                  Just this video
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScope("folder")}
+                  className={`flex-1 px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors border-l-2 border-[#1a1a1a] ${
+                    scope === "folder"
+                      ? "bg-[#1a1a1a] text-[#f0f0e8]"
+                      : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0]"
+                  }`}
+                  title={`Share everything in "${containingFolder.name}" — new uploads to this folder will join the share automatically.`}
+                >
+                  Folder: {containingFolder.name}
+                </button>
+              </div>
+              {scope === "folder" ? (
+                <p className="text-[11px] text-[#888]">
+                  Live folder share. One paywall covers every item; new uploads
+                  to <span className="font-mono">{containingFolder.name}</span> appear
+                  automatically.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold uppercase tracking-wider text-[#888]">Expiration</label>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="w-full justify-between mt-1">
+                <Button variant="outline" className="w-full justify-between">
                   {newLinkOptions.expiresInDays
                     ? `${newLinkOptions.expiresInDays} days`
                     : "Never"}
@@ -292,8 +354,8 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
             </DropdownMenu>
           </div>
 
-          <div>
-            <label className="text-sm text-[#888]">Password (optional)</label>
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold uppercase tracking-wider text-[#888]">Password (optional)</label>
             <Input
               type="password"
               placeholder="Leave empty for no password"
@@ -304,11 +366,10 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
                   password: e.target.value || undefined,
                 }))
               }
-              className="mt-1"
             />
           </div>
 
-          <div className="flex items-center justify-between gap-3 border-2 border-[#1a1a1a] bg-[#f0f0e8] p-3">
+          <div className="flex items-center justify-between gap-3 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-4 py-3.5">
             <div className="font-bold text-sm">Allow download</div>
             <button
               type="button"
@@ -324,8 +385,8 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
             </button>
           </div>
 
-          <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8] p-3 space-y-3">
-            <div className="flex items-center justify-between gap-2">
+          <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8]">
+            <div className="flex items-center justify-between gap-2 px-4 py-3.5">
               <div className="font-bold text-sm flex items-center gap-2">
                 <DollarSign className="h-4 w-4" />
                 Paywall
@@ -349,10 +410,10 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
               </button>
             </div>
             {paywallEnabled ? (
-              <div className="space-y-2">
+              <div className="border-t-2 border-[#1a1a1a] p-4 space-y-3">
                 <div className="flex gap-2">
-                  <div className="flex-1">
-                    <label className="text-xs text-[#888]">Price</label>
+                  <div className="flex-1 space-y-1.5">
+                    <label className="text-xs font-bold uppercase tracking-wider text-[#888]">Price</label>
                     <Input
                       type="number"
                       min={0.5}
@@ -365,11 +426,10 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
                           priceDollars: e.target.value,
                         }))
                       }
-                      className="mt-1"
                     />
                   </div>
-                  <div className="w-24">
-                    <label className="text-xs text-[#888]">Currency</label>
+                  <div className="w-24 space-y-1.5">
+                    <label className="text-xs font-bold uppercase tracking-wider text-[#888]">Currency</label>
                     <Input
                       value={newLinkOptions.currency.toUpperCase()}
                       onChange={(e) =>
@@ -378,12 +438,12 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
                           currency: e.target.value.toLowerCase().slice(0, 4),
                         }))
                       }
-                      className="mt-1 uppercase"
+                      className="uppercase"
                     />
                   </div>
                 </div>
-                <div>
-                  <label className="text-xs text-[#888]">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold uppercase tracking-wider text-[#888]">
                     Client email (for invoice + watermark)
                   </label>
                   <Input
@@ -396,11 +456,10 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
                         clientEmail: e.target.value,
                       }))
                     }
-                    className="mt-1"
                   />
                 </div>
-                <div>
-                  <label className="text-xs text-[#888]">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold uppercase tracking-wider text-[#888]">
                     Invoice description (optional)
                   </label>
                   <Input
@@ -412,7 +471,6 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
                         description: e.target.value,
                       }))
                     }
-                    className="mt-1"
                   />
                 </div>
               </div>
@@ -429,18 +487,17 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
             <Plus className="mr-2 h-4 w-4" />
             {isCreating ? "Creating…" : "Create link"}
           </Button>
-          </div>
-        </details>
+        </section>
 
         <Separator />
 
-        <details className="space-y-2 [&_summary]:cursor-pointer" open>
-          <summary className="font-bold text-sm text-[#1a1a1a] flex items-center justify-between">
+        <section className="space-y-3">
+          <div className="font-bold text-sm text-[#1a1a1a] flex items-center justify-between uppercase tracking-wider">
             <span>Links</span>
-            <span className="text-[10px] font-mono font-normal text-[#888] uppercase tracking-wider">
+            <span className="text-[10px] font-mono font-normal text-[#888]">
               {shareLinks?.length ?? 0}
             </span>
-          </summary>
+          </div>
           {shareLinks === undefined ? (
             <p className="text-sm text-[#888]">Loading...</p>
           ) : shareLinks.length === 0 ? (
@@ -518,7 +575,7 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
               ))}
             </div>
           )}
-        </details>
+        </section>
         </>
         ) : null}
       </DialogContent>

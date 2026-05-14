@@ -1,5 +1,6 @@
 import { useQuery, type ConvexReactClient } from "convex/react";
 import { api } from "@convex/_generated/api";
+import { Id } from "@convex/_generated/dataModel";
 import {
   makeRouteQuerySpec,
   prewarmSpecs,
@@ -13,22 +14,51 @@ export function getShareEssentialSpecs(params: { token: string }) {
   ];
 }
 
-export function useShareData(params: { token: string; grantToken?: string | null }) {
+export function useShareData(params: {
+  token: string;
+  grantToken?: string | null;
+  itemVideoId?: Id<"videos"> | null;
+}) {
   const shareInfo = useQuery(api.shareLinks.getByToken, {
     token: params.token,
   });
 
-  const videoData = useQuery(
-    api.videos.getByShareGrant,
+  // Top-level summary distinguishes single-video shares from bundle
+  // (folder/selection) shares. Bundle item playback + comments are scoped
+  // to the currently active item.
+  const summary = useQuery(
+    api.videos.getShareSummaryByGrant,
     params.grantToken ? { grantToken: params.grantToken } : "skip",
   );
+
+  const isBundle = summary?.kind === "bundle";
+  const videoArgs = params.grantToken
+    ? isBundle
+      ? params.itemVideoId
+        ? { grantToken: params.grantToken, itemVideoId: params.itemVideoId }
+        : null
+      : { grantToken: params.grantToken }
+    : null;
+
+  const videoData = useQuery(
+    api.videos.getByShareGrant,
+    videoArgs ?? "skip",
+  );
+
+  const commentsArgs = params.grantToken
+    ? isBundle
+      ? params.itemVideoId
+        ? { grantToken: params.grantToken, itemVideoId: params.itemVideoId }
+        : null
+      : { grantToken: params.grantToken }
+    : null;
 
   const comments = useQuery(
     api.comments.getThreadedForShareGrant,
-    params.grantToken ? { grantToken: params.grantToken } : "skip",
+    commentsArgs ?? "skip",
   );
 
-  return { shareInfo, videoData, comments };
+  return { shareInfo, summary, videoData, comments };
 }
 
 export async function prewarmShare(

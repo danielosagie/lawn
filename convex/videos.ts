@@ -1,9 +1,10 @@
 import { v } from "convex/values";
-import { internalMutation, internalQuery, mutation, query, MutationCtx } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, query, MutationCtx, QueryCtx } from "./_generated/server";
 import { getUser, identityName, requireProjectAccess, requireVideoAccess } from "./auth";
 import { Doc, Id } from "./_generated/dataModel";
 import { generateUniqueToken } from "./security";
 import { resolveActiveShareGrant } from "./shareAccess";
+import { resolveBundleVideos } from "./shareBundles";
 import { assertTeamCanStoreBytes } from "./billingHelpers";
 
 const workflowStatusValidator = v.union(
@@ -262,15 +263,45 @@ export const getPublicIdByVideoId = query({
   },
 });
 
+/**
+ * Resolve the playable video for a share grant. For single-video links the
+ * link's videoId is used directly. For bundle links the caller must pass
+ * `itemVideoId` and we verify it's a member of the bundle — protects against
+ * a paid grant being used to unlock videos in a *different* share.
+ */
+async function resolveShareTargetVideo(
+  ctx: QueryCtx,
+  shareLink: Doc<"shareLinks">,
+  itemVideoId: Id<"videos"> | undefined,
+): Promise<Doc<"videos"> | null> {
+  if (shareLink.videoId) {
+    return await ctx.db.get(shareLink.videoId);
+  }
+  if (!shareLink.bundleId) return null;
+  if (!itemVideoId) return null;
+  const bundle = await ctx.db.get(shareLink.bundleId);
+  if (!bundle) return null;
+  const bundleVideos = await resolveBundleVideos(ctx, bundle);
+  const target = bundleVideos.find((v) => v._id === itemVideoId);
+  return target ?? null;
+}
+
 export const getByShareGrant = query({
-  args: { grantToken: v.string() },
+  args: {
+    grantToken: v.string(),
+    itemVideoId: v.optional(v.id("videos")),
+  },
   handler: async (ctx, args) => {
     const resolved = await resolveActiveShareGrant(ctx, args.grantToken);
     if (!resolved) {
       return null;
     }
 
-    const video = await ctx.db.get(resolved.shareLink.videoId);
+    const video = await resolveShareTargetVideo(
+      ctx,
+      resolved.shareLink,
+      args.itemVideoId,
+    );
     if (!video || video.deletedAt || video.status !== "ready") {
       return null;
     }
@@ -293,14 +324,21 @@ export const getByShareGrant = query({
 });
 
 export const getByShareGrantForDownload = query({
-  args: { grantToken: v.string() },
+  args: {
+    grantToken: v.string(),
+    itemVideoId: v.optional(v.id("videos")),
+  },
   handler: async (ctx, args) => {
     const resolved = await resolveActiveShareGrant(ctx, args.grantToken);
     if (!resolved) {
       return null;
     }
 
-    const video = await ctx.db.get(resolved.shareLink.videoId);
+    const video = await resolveShareTargetVideo(
+      ctx,
+      resolved.shareLink,
+      args.itemVideoId,
+    );
     if (!video || video.deletedAt) {
       return null;
     }
@@ -989,6 +1027,40 @@ export const setMuxPreviewPlaybackId = internalMutation({
   },
 });
 
+/** Read-only helper for the sharp-based image preview generator. */
+export const getForImagePreview = internalQuery({
+  args: { videoId: v.id("videos") },
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (!video) return null;
+    return {
+      _id: video._id,
+      s3Key: video.s3Key ?? null,
+      contentType: video.contentType ?? null,
+      imagePreviewS3Key: video.imagePreviewS3Key ?? null,
+      imagePreviewStatus: video.imagePreviewStatus ?? null,
+    };
+  },
+});
+
+export const setImagePreview = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+    imagePreviewStatus: v.union(
+      v.literal("pending"),
+      v.literal("ready"),
+      v.literal("errored"),
+    ),
+    imagePreviewS3Key: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.videoId, {
+      imagePreviewStatus: args.imagePreviewStatus,
+      imagePreviewS3Key: args.imagePreviewS3Key,
+    });
+  },
+});
+
 export const getVideoByMuxPreviewAssetId = internalQuery({
   args: { muxPreviewAssetId: v.string() },
   returns: v.union(
@@ -1028,11 +1100,18 @@ export const getForPreviewGen = query({
 
 /** Resolves a share-grant token to the underlying video + paywall state. */
 export const getByShareGrantWithPaywall = query({
-  args: { grantToken: v.string() },
+  args: {
+    grantToken: v.string(),
+    itemVideoId: v.optional(v.id("videos")),
+  },
   handler: async (ctx, args) => {
     const resolved = await resolveActiveShareGrant(ctx, args.grantToken);
     if (!resolved) return null;
-    const video = await ctx.db.get(resolved.shareLink.videoId);
+    const video = await resolveShareTargetVideo(
+      ctx,
+      resolved.shareLink,
+      args.itemVideoId,
+    );
     if (!video) return null;
     return {
       grant: {
@@ -1059,8 +1138,81 @@ export const getByShareGrantWithPaywall = query({
         muxPreviewAssetId: video.muxPreviewAssetId,
         muxPreviewPlaybackId: video.muxPreviewPlaybackId,
         muxPreviewAssetStatus: video.muxPreviewAssetStatus,
+        imagePreviewS3Key: video.imagePreviewS3Key ?? null,
+        imagePreviewStatus: video.imagePreviewStatus ?? null,
       },
     };
+  },
+});
+
+/**
+ * Public share-page summary. Returns either `kind: "single"` (legacy
+ * single-video share) or `kind: "bundle"` (folder/selection bundle with an
+ * item list). The client uses this to decide whether to render the player
+ * directly or a folder index grid + per-item playback.
+ */
+export const getShareSummaryByGrant = query({
+  args: { grantToken: v.string() },
+  handler: async (ctx, args) => {
+    const resolved = await resolveActiveShareGrant(ctx, args.grantToken);
+    if (!resolved) return null;
+
+    if (resolved.shareLink.videoId) {
+      const video = await ctx.db.get(resolved.shareLink.videoId);
+      if (!video || video.deletedAt) return null;
+      return {
+        kind: "single" as const,
+        single: {
+          videoId: video._id,
+          title: video.title,
+          description: video.description ?? null,
+          duration: video.duration ?? null,
+          thumbnailUrl: video.thumbnailUrl ?? null,
+          contentType: video.contentType ?? null,
+          status: video.status,
+        },
+        bundle: null,
+        paywall: resolved.shareLink.paywall ?? null,
+        allowDownload: resolved.shareLink.allowDownload,
+        grantExpiresAt: resolved.grant.expiresAt,
+        grantPaidAt: resolved.grant.paidAt ?? null,
+      };
+    }
+
+    if (resolved.shareLink.bundleId) {
+      const bundle = await ctx.db.get(resolved.shareLink.bundleId);
+      if (!bundle) return null;
+      const videos = await resolveBundleVideos(ctx, bundle);
+      return {
+        kind: "bundle" as const,
+        single: null,
+        bundle: {
+          _id: bundle._id,
+          name: bundle.name,
+          kind: bundle.kind,
+          items: videos
+            .filter((v) => v.status === "ready")
+            .map((v) => ({
+              _id: v._id,
+              title: v.title,
+              duration: v.duration ?? null,
+              thumbnailUrl: v.thumbnailUrl ?? null,
+              contentType: v.contentType ?? null,
+              // For non-video items the share page needs to know whether the
+              // watermarked preview is ready and whether the original is even
+              // a Mux playable.
+              imagePreviewStatus: v.imagePreviewStatus ?? null,
+              hasMuxPlayback: Boolean(v.muxPlaybackId),
+            })),
+        },
+        paywall: resolved.shareLink.paywall ?? null,
+        allowDownload: resolved.shareLink.allowDownload,
+        grantExpiresAt: resolved.grant.expiresAt,
+        grantPaidAt: resolved.grant.paidAt ?? null,
+      };
+    }
+
+    return null;
   },
 });
 

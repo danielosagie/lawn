@@ -1,5 +1,6 @@
 import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
+import { Id } from "@convex/_generated/dataModel";
 import { Link, useParams } from "@tanstack/react-router";
 import { useUser } from "@clerk/tanstack-react-start";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -38,6 +39,7 @@ export default function SharePage() {
   const issueAccessGrant = useMutation(api.shareLinks.issueAccessGrant);
   const createComment = useMutation(api.comments.createForShareGrant);
   const getPaywalledPlayback = useAction(api.videoActions.getSharedPaywalledPlayback);
+  const getImagePreview = useAction(api.videoActions.getSharedImagePreview);
   const createCheckoutForGrant = useAction(
     api.paymentsActions.createCheckoutForGrant,
   );
@@ -51,18 +53,14 @@ export default function SharePage() {
   const [passwordError, setPasswordError] = useState(false);
   const [isRequestingGrant, setIsRequestingGrant] = useState(false);
   const [playbackSession, setPlaybackSession] = useState<{
+    kind: "video" | "image";
     url: string;
     posterUrl: string;
-    mode: "public" | "preview" | "full";
+    mode: "public" | "preview" | "preview_pending" | "full" | "unsupported";
     tokenExpiresAt: number | null;
   } | null>(null);
   const [isLoadingPlayback, setIsLoadingPlayback] = useState(false);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
-  const [paywall, setPaywall] = useState<{
-    priceCents: number;
-    currency: string;
-    description?: string;
-  } | null>(null);
   const [isCreatingCheckout, setIsCreatingCheckout] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -81,15 +79,44 @@ export default function SharePage() {
     grantToken ? { grantToken } : "skip",
   );
 
-  const isPaywalled = playbackSession?.mode === "preview" || playbackSession?.mode === "full";
-  const { suspectAutomation } = useAntiPiracyDefenses(Boolean(isPaywalled));
+  // Source of truth for paywall state is the live unlockState query — it
+  // works even when playbackSession failed to load (e.g. preview asset still
+  // ingesting). Playback mode is only used for the player UI.
+  const paywall = unlockState?.paywall ?? null;
+  const isPaid = Boolean(unlockState?.paid);
+  const isPaywalled = Boolean(paywall);
+  const { suspectAutomation } = useAntiPiracyDefenses(isPaywalled);
+
+  // For bundle shares, the active item is the one currently being viewed /
+  // commented on. Defaults to the first ready item once the summary loads.
+  const [activeItemId, setActiveItemId] = useState<Id<"videos"> | null>(null);
 
   useEffect(() => {
     setIsDownloading(false);
     setDownloadError(null);
   }, [token]);
 
-  const { shareInfo, videoData, comments } = useShareData({ token, grantToken });
+  const { shareInfo, summary, videoData, comments } = useShareData({
+    token,
+    grantToken,
+    itemVideoId: activeItemId,
+  });
+
+  const isBundle = summary?.kind === "bundle";
+  const bundleItems = summary?.bundle?.items ?? [];
+
+  // Auto-pick the first bundle item once we have the summary, and reset
+  // whenever the share token changes.
+  useEffect(() => {
+    if (isBundle && !activeItemId && bundleItems.length > 0) {
+      setActiveItemId(bundleItems[0]._id as Id<"videos">);
+    }
+  }, [isBundle, activeItemId, bundleItems]);
+
+  useEffect(() => {
+    setActiveItemId(null);
+  }, [token]);
+
   const canTrackPresence = Boolean(playbackSession?.url && videoData?.video?._id);
   const { watchers } = useVideoPresence({
     videoId: videoData?.video?._id,
@@ -146,7 +173,6 @@ export default function SharePage() {
     if (!grantToken) {
       setPlaybackSession(null);
       setPlaybackError(null);
-      setPaywall(null);
       return;
     }
 
@@ -154,16 +180,48 @@ export default function SharePage() {
     setIsLoadingPlayback(true);
     setPlaybackError(null);
 
-    void getPaywalledPlayback({ grantToken })
+    // Bundle shares can't request playback until we know which item is active.
+    if (isBundle && !activeItemId) {
+      setIsLoadingPlayback(false);
+      return;
+    }
+
+    // Branch on content type. Images go through the sharp-watermark preview
+    // pipeline + signed S3 URL; videos go through Mux signed playback.
+    const activeContentType =
+      (isBundle
+        ? bundleItems.find((item) => item._id === activeItemId)?.contentType
+        : summary?.kind === "single"
+          ? summary.single?.contentType
+          : null) ?? null;
+    const isImage = Boolean(activeContentType?.startsWith("image/"));
+
+    const loader = isImage
+      ? getImagePreview({
+          grantToken,
+          itemVideoId: activeItemId ?? undefined,
+        }).then((s) => ({
+          kind: "image" as const,
+          url: s.url,
+          posterUrl: "",
+          mode: s.mode,
+          tokenExpiresAt: s.tokenExpiresAt,
+        }))
+      : getPaywalledPlayback({
+          grantToken,
+          itemVideoId: activeItemId ?? undefined,
+        }).then((s) => ({
+          kind: "video" as const,
+          url: s.url,
+          posterUrl: s.posterUrl,
+          mode: s.mode,
+          tokenExpiresAt: s.tokenExpiresAt,
+        }));
+
+    void loader
       .then((session) => {
         if (cancelled) return;
-        setPlaybackSession({
-          url: session.url,
-          posterUrl: session.posterUrl,
-          mode: session.mode,
-          tokenExpiresAt: session.tokenExpiresAt,
-        });
-        setPaywall(session.paywall);
+        setPlaybackSession(session);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -179,7 +237,17 @@ export default function SharePage() {
     return () => {
       cancelled = true;
     };
-  }, [getPaywalledPlayback, grantToken, paidFlag, reloadTrigger]);
+  }, [
+    getPaywalledPlayback,
+    getImagePreview,
+    grantToken,
+    paidFlag,
+    reloadTrigger,
+    isBundle,
+    activeItemId,
+    bundleItems,
+    summary,
+  ]);
 
   // Heartbeat — refresh the signed Mux JWT before it expires. Token TTL is
   // 5 minutes; refresh at 4 minutes.
@@ -195,6 +263,16 @@ export default function SharePage() {
     }, msUntilRefresh);
     return () => window.clearTimeout(timer);
   }, [playbackSession?.tokenExpiresAt]);
+
+  // While the watermarked preview asset is still ingesting, poll every 5s so
+  // the share page auto-recovers without a manual refresh.
+  useEffect(() => {
+    if (playbackSession?.mode !== "preview_pending") return;
+    const timer = window.setInterval(() => {
+      setReloadTrigger((n) => n + 1);
+    }, 5_000);
+    return () => window.clearInterval(timer);
+  }, [playbackSession?.mode]);
 
   const handlePay = useCallback(async () => {
     if (!grantToken || isCreatingCheckout) return;
@@ -295,6 +373,7 @@ export default function SharePage() {
         grantToken,
         text: commentText.trim(),
         timestampSeconds: currentTime,
+        itemVideoId: activeItemId ?? undefined,
       });
       setCommentText("");
     } catch {
@@ -310,7 +389,10 @@ export default function SharePage() {
     setDownloadError(null);
     setIsDownloading(true);
     try {
-      const result = await getDownloadUrl({ grantToken });
+      const result = await getDownloadUrl({
+        grantToken,
+        itemVideoId: activeItemId ?? undefined,
+      });
       triggerDownload(result.url, result.filename);
     } catch (error) {
       console.error("Failed to prepare shared download:", error);
@@ -404,7 +486,10 @@ export default function SharePage() {
     );
   }
 
-  if (!videoData?.video) {
+  // Single-video shares fail closed when the video can't be loaded. Bundle
+  // shares are valid as long as the bundle row exists — they show an empty-
+  // state if there are no ready items.
+  if (!isBundle && !videoData?.video) {
     return (
       <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
         <Card className="max-w-md w-full">
@@ -422,13 +507,21 @@ export default function SharePage() {
     );
   }
 
-  const video = videoData.video;
+  const video = videoData?.video ?? null;
+  const headerTitle = isBundle
+    ? summary?.bundle?.name ?? "Shared bundle"
+    : video?.title ?? "Shared video";
+  const headerDescription = isBundle
+    ? bundleItems.length === 1
+      ? "1 item"
+      : `${bundleItems.length} items`
+    : video?.description ?? null;
   const isPreviewMode = playbackSession?.mode === "preview";
+  const isPreviewPending = playbackSession?.mode === "preview_pending";
   const isFullMode = playbackSession?.mode === "full";
-  const isPaid = Boolean(unlockState?.paid);
-  const downloadAllowed = !paywall || isPaid;
+  const downloadAllowed = !isPaywalled || isPaid;
 
-  if (suspectAutomation && (isPreviewMode || isFullMode)) {
+  if (suspectAutomation && (isPreviewMode || isFullMode || isPreviewPending)) {
     return (
       <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
         <Card className="max-w-md w-full">
@@ -482,24 +575,87 @@ export default function SharePage() {
         ) : null}
 
         <div>
-          <h1 className="text-2xl font-black text-[#1a1a1a]">{video.title}</h1>
-          {video.description && (
-            <p className="text-[#888] mt-1">{video.description}</p>
-          )}
+          <h1 className="text-2xl font-black text-[#1a1a1a]">{headerTitle}</h1>
+          {headerDescription ? (
+            <p className="text-[#888] mt-1">{headerDescription}</p>
+          ) : null}
           <div className="flex items-center gap-4 mt-2 text-sm text-[#888]">
-            {video.duration && <span className="font-mono">{formatDuration(video.duration)}</span>}
+            {isBundle && video?.title ? (
+              <span className="font-mono text-[#1a1a1a]">{video.title}</span>
+            ) : null}
+            {video?.duration ? (
+              <span className="font-mono">{formatDuration(video.duration)}</span>
+            ) : null}
             {comments && <span>{comments.length} threads</span>}
             <VideoWatchers watchers={watchers} className="ml-auto" />
           </div>
         </div>
 
-        {paywall && isPreviewMode ? (
+        {isBundle && bundleItems.length > 0 ? (
+          <section
+            className="border-2 border-[#1a1a1a] bg-[#e8e8e0] p-3"
+            aria-label="Bundle items"
+          >
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+              {bundleItems.map((item) => {
+                const isActive = item._id === activeItemId;
+                return (
+                  <button
+                    key={item._id}
+                    type="button"
+                    onClick={() => setActiveItemId(item._id as Id<"videos">)}
+                    className={`text-left border-2 ${
+                      isActive
+                        ? "border-[#FF6600] bg-[#FFEDD5]"
+                        : "border-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#e0e0d6]"
+                    } transition-colors`}
+                  >
+                    <div className="aspect-video bg-[#1a1a1a] overflow-hidden">
+                      {item.thumbnailUrl ? (
+                        <img
+                          src={item.thumbnailUrl}
+                          alt={item.title}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-[#666]">
+                          <Video className="h-6 w-6" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="p-2">
+                      <div className="text-xs font-bold text-[#1a1a1a] truncate">
+                        {item.title}
+                      </div>
+                      {item.duration ? (
+                        <div className="text-[10px] font-mono text-[#888]">
+                          {formatDuration(item.duration)}
+                        </div>
+                      ) : null}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
+
+        {isBundle && bundleItems.length === 0 ? (
+          <section className="border-2 border-[#1a1a1a] bg-[#e8e8e0] p-6 text-center text-sm text-[#888]">
+            This bundle has no ready items yet. Uploads will appear here as soon as
+            processing finishes.
+          </section>
+        ) : null}
+
+        {paywall && !isPaid ? (
           <section className="border-2 border-[#1a1a1a] bg-[#FF6600] text-[#f0f0e8] p-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div className="text-xs font-mono uppercase tracking-widest opacity-80">
                 {demoStatus && !demoStatus.stripeConfigured
                   ? "Demo mode — simulated payment"
-                  : "Preview only — paywalled delivery"}
+                  : isPreviewPending
+                    ? "Preview rendering — you can pay now"
+                    : "Preview only — paywalled delivery"}
               </div>
               <div className="font-black text-2xl tracking-tight">
                 {formatPrice(paywall.priceCents, paywall.currency)} to unlock full
@@ -512,7 +668,7 @@ export default function SharePage() {
             <div className="flex flex-col items-stretch sm:items-end gap-2">
               <Button
                 onClick={() => void handlePay()}
-                disabled={isCreatingCheckout}
+                disabled={isCreatingCheckout || !grantToken}
                 className="bg-[#f0f0e8] text-[#1a1a1a] hover:bg-white"
               >
                 {isCreatingCheckout
@@ -532,7 +688,7 @@ export default function SharePage() {
           </section>
         ) : null}
 
-        {paywall && isFullMode ? (
+        {paywall && isPaid ? (
           <section className="border-2 border-[#1a1a1a] bg-[#FFB380] text-[#1a1a1a] px-5 py-3 flex items-center gap-2 font-bold">
             <ShieldCheck className="h-4 w-4" />
             Paid — full-resolution unlocked
@@ -540,7 +696,7 @@ export default function SharePage() {
         ) : null}
 
         <div className="relative border-2 border-[#1a1a1a] overflow-hidden">
-          {playbackSession?.url ? (
+          {playbackSession?.url && playbackSession.kind === "video" ? (
             <>
               <VideoPlayer
                 ref={playerRef}
@@ -553,30 +709,60 @@ export default function SharePage() {
               {isPaywalled ? (
                 <ShareWatermarkOverlay
                   label={
-                    shareInfo?.status === "ok"
-                      ? `share/${token.slice(0, 8)}`
-                      : "PREVIEW"
+                    user?.primaryEmailAddress?.emailAddress ??
+                    user?.fullName ??
+                    `share/${token.slice(0, 8)}`
                   }
                   secondary={isPreviewMode ? "PREVIEW — DO NOT REDISTRIBUTE" : undefined}
                   active={isPreviewMode}
                 />
               ) : null}
             </>
+          ) : playbackSession?.url && playbackSession.kind === "image" ? (
+            <div className="relative bg-[#1a1a1a]">
+              <img
+                src={playbackSession.url}
+                alt={video?.title ?? "Shared image"}
+                className="w-full h-auto max-h-[80vh] object-contain mx-auto block"
+                draggable={false}
+                onContextMenu={(e) => {
+                  if (isPaywalled) e.preventDefault();
+                }}
+              />
+              {isPaywalled ? (
+                <ShareWatermarkOverlay
+                  label={
+                    user?.primaryEmailAddress?.emailAddress ??
+                    user?.fullName ??
+                    `share/${token.slice(0, 8)}`
+                  }
+                  secondary={isPreviewMode ? "PREVIEW — DO NOT REDISTRIBUTE" : undefined}
+                  active={isPreviewMode}
+                />
+              ) : null}
+            </div>
           ) : (
             <div className="relative aspect-video overflow-hidden rounded-xl border border-zinc-800/80 bg-black shadow-[0_10px_40px_rgba(0,0,0,0.45)]">
-              {(playbackSession?.posterUrl || video.thumbnailUrl?.startsWith("http")) ? (
+              {(playbackSession?.posterUrl || video?.thumbnailUrl?.startsWith("http")) ? (
                 <img
-                  src={playbackSession?.posterUrl ?? video.thumbnailUrl}
-                  alt={`${video.title} thumbnail`}
+                  src={playbackSession?.posterUrl ?? video?.thumbnailUrl ?? ""}
+                  alt={`${video?.title ?? "Video"} thumbnail`}
                   className="h-full w-full object-cover blur-[4px]"
                 />
               ) : null}
               <div className="absolute inset-0 bg-black/45" />
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-white">
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-white px-4 text-center">
                 <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
                 <p className="text-sm font-medium text-white/85">
-                  {playbackError ?? (isLoadingPlayback ? "Loading stream..." : "Preparing stream...")}
+                  {isPreviewPending
+                    ? "Preparing watermarked preview… this usually takes 30–90 seconds."
+                    : playbackError ?? (isLoadingPlayback ? "Loading stream..." : "Preparing stream...")}
                 </p>
+                {isPreviewPending && paywall && !isPaid ? (
+                  <p className="text-xs text-white/60 max-w-sm">
+                    You can pay now and the full-resolution stream will unlock as soon as the preview is ready.
+                  </p>
+                ) : null}
               </div>
             </div>
           )}

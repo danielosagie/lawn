@@ -112,7 +112,10 @@ export const createCheckoutForGrant = action({
     const amountCents = paywall.priceCents;
     const currency = paywall.currency;
     const productName =
-      paywall.description ?? `Final delivery: ${lookup.video.title}`;
+      paywall.description ??
+      (lookup.bundleName
+        ? `Final delivery: ${lookup.bundleName}`
+        : `Final delivery: ${lookup.video.title}`);
     const applicationFeeAmount = computeApplicationFee(amountCents);
 
     const session = await stripe.checkout.sessions.create({
