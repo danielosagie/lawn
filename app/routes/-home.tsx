@@ -1,9 +1,14 @@
 import { useState, useEffect } from "react";
 import { Link } from "@tanstack/react-router";
+import { useUser } from "@clerk/tanstack-react-start";
 import { MarketingFooter } from "@/components/MarketingFooter";
+import { Apple } from "lucide-react";
 
 export default function Homepage() {
   const [scrolled, setScrolled] = useState(false);
+  const { user, isSignedIn } = useUser();
+  const greeting =
+    user?.firstName || user?.primaryEmailAddress?.emailAddress?.split("@")[0] || "Account";
 
   useEffect(() => {
     const handleScroll = () => {
@@ -47,8 +52,32 @@ export default function Homepage() {
         <div className="flex gap-6 items-center text-sm font-bold uppercase tracking-wide">
           <a href="#pricing" className="hover:underline underline-offset-4">Pricing</a>
           <Link to="/compare/frameio" className={`hover:underline underline-offset-4 hidden sm:block`}>Compare</Link>
-          <Link to="/sign-in" className="hover:underline underline-offset-4">Log in</Link>
-          <Link to="/sign-up" className={`px-4 py-2 border-2 transition-colors ${scrolled ? 'border-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8]' : 'border-[#f0f0e8] hover:bg-[#f0f0e8] hover:text-[#1a1a1a]'}`}>Start</Link>
+          <a
+            href="/downloads/snip-desktop.dmg"
+            className={`hidden sm:inline-flex items-center gap-1.5 hover:underline underline-offset-4`}
+            title="Download snip Desktop for macOS"
+          >
+            <Apple className="h-3.5 w-3.5" />
+            <span>Download</span>
+          </a>
+          {isSignedIn ? (
+            <>
+              <Link to="/dashboard" className="hover:underline underline-offset-4">
+                {greeting}
+              </Link>
+              <Link
+                to="/dashboard"
+                className={`px-4 py-2 border-2 transition-colors ${scrolled ? 'border-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8]' : 'border-[#f0f0e8] hover:bg-[#f0f0e8] hover:text-[#1a1a1a]'}`}
+              >
+                Open app
+              </Link>
+            </>
+          ) : (
+            <>
+              <Link to="/sign-in" className="hover:underline underline-offset-4">Log in</Link>
+              <Link to="/sign-up" className={`px-4 py-2 border-2 transition-colors ${scrolled ? 'border-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8]' : 'border-[#f0f0e8] hover:bg-[#f0f0e8] hover:text-[#1a1a1a]'}`}>Start</Link>
+            </>
+          )}
         </div>
       </nav>
 
