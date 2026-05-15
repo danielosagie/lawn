@@ -7,6 +7,7 @@ const fs = require("node:fs/promises");
 const fssync = require("node:fs");
 const { spawn, execSync, execFile } = require("node:child_process");
 const crypto = require("node:crypto");
+const zlib = require("node:zlib");
 
 const DEV_URL = "http://localhost:5300";
 const PROD_INDEX = path.join(__dirname, "dist/index.html");
@@ -338,6 +339,175 @@ function stopPresenceLoop() {
   }).catch(() => {});
 }
 
+// ---- Feature loop: predictive prefetch ---------------------------------------
+//
+// Premiere editors hit the play button and expect their clips to scrub
+// immediately. With a cloud-backed mount that means rclone's VFS cache
+// has to already hold the first chunk of every clip in the bin. We get
+// most of the way there by watching for `.prproj` writes (Premiere
+// rewrites the project on every save / autosave) and warming the cache
+// for every absolute mount-path string we find in the decompressed
+// project XML.
+//
+// Scope notes for v0:
+// - Only Premiere `.prproj`. DaVinci Resolve `.drp` is sqlite; FCP
+//   `.fcpxmld` is a bundle. Both are 2× the work each and will land
+//   in follow-up commits if this approach pans out.
+// - We don't parse the XML structure — we scan the decompressed bytes
+//   for substrings that start with the mount path. Misses
+//   ${PROJ_LOCATION}-style placeholders but catches the common case of
+//   absolute paths that the editor resolved before saving.
+// - Warmer is `cat <path> >/dev/null` with concurrency 4. Each call
+//   pulls the file through rclone's VFS cache; cache size is bounded
+//   by the user's rclone --vfs-cache-max-size flag.
+// - lastWarmed dedupes per-path with a 60s window so re-saving a
+//   project every few seconds during an editing burst doesn't kick
+//   off a thundering herd against the bucket.
+
+// zlib + fast-xml-parser are required further down in this file for the
+// Resolve / Premiere snapshot flows. We reuse those imports here rather
+// than re-declaring them; the prefetch implementation only needs gunzip
+// and substring scanning — no structured XML walk yet.
+
+const prefetchState = {
+  watcher: null,
+  // path → epoch-ms of the last successful warm. Cap at 5 minutes so a
+  // long-running session doesn't grow this map without bound.
+  lastWarmed: new Map(),
+  inFlight: new Set(),
+  queue: [],
+  workers: 0,
+};
+
+const PREFETCH_WARM_COOLDOWN_MS = 60_000;
+const PREFETCH_MAX_CONCURRENCY = 4;
+const PREFETCH_MAX_PATHS_PER_PROJ = 2000;
+
+function decompressIfGzip(buf) {
+  // Premiere .prproj starts with the gzip magic bytes 1f 8b.
+  if (buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
+    return zlib.gunzipSync(buf);
+  }
+  return buf;
+}
+
+function extractMountPathsFromProject(text, mountPath) {
+  // Scan for substrings that start with the mount root and look like
+  // file paths. The regex bound is `[^<>"'\s]+` which covers paths
+  // embedded in XML attributes ("path=...") and CDATA blocks.
+  const escaped = mountPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`${escaped}/[^<>"'\\s]+`, "g");
+  const out = new Set();
+  let match;
+  let count = 0;
+  while ((match = re.exec(text)) !== null) {
+    out.add(match[0]);
+    if (++count > PREFETCH_MAX_PATHS_PER_PROJ) break;
+  }
+  return [...out];
+}
+
+function warmPathOnce(absPath) {
+  return new Promise((resolve) => {
+    // `cat path >/dev/null` is the standard way to pull a file through
+    // rclone's VFS cache. We open + drain via streams to keep memory
+    // flat regardless of file size; the OS-level read is what populates
+    // the cache, not our buffer in JS.
+    const stream = fssync.createReadStream(absPath, { highWaterMark: 1 << 20 });
+    stream.on("data", () => {}); // drain
+    stream.on("end", () => resolve(true));
+    stream.on("error", () => resolve(false));
+  });
+}
+
+async function prefetchWorker() {
+  while (prefetchState.queue.length) {
+    const next = prefetchState.queue.shift();
+    if (prefetchState.inFlight.has(next)) continue;
+    prefetchState.inFlight.add(next);
+    try {
+      const ok = await warmPathOnce(next);
+      if (ok) prefetchState.lastWarmed.set(next, Date.now());
+    } finally {
+      prefetchState.inFlight.delete(next);
+    }
+  }
+  prefetchState.workers--;
+}
+
+function enqueuePrefetch(paths) {
+  const now = Date.now();
+  for (const p of paths) {
+    const last = prefetchState.lastWarmed.get(p);
+    if (last && now - last < PREFETCH_WARM_COOLDOWN_MS) continue;
+    if (prefetchState.inFlight.has(p)) continue;
+    prefetchState.queue.push(p);
+  }
+  while (prefetchState.workers < PREFETCH_MAX_CONCURRENCY && prefetchState.queue.length) {
+    prefetchState.workers++;
+    void prefetchWorker();
+  }
+}
+
+async function handlePrprojWrite(absPath, mountPath) {
+  try {
+    // Tiny debounce: Premiere autosave writes the file in two passes
+    // (temp file → rename). Wait 250ms so we read the final version.
+    await new Promise((r) => setTimeout(r, 250));
+    const raw = await fs.readFile(absPath);
+    const xml = decompressIfGzip(raw).toString("utf8");
+    const paths = extractMountPathsFromProject(xml, mountPath);
+    pushLog?.(`prefetch: ${path.basename(absPath)} → warming ${paths.length} media file(s)`);
+    enqueuePrefetch(paths);
+    // Cap the lastWarmed map. Iteration order is insertion order, so
+    // the oldest entries fall off first.
+    if (prefetchState.lastWarmed.size > 5000) {
+      const overflow = prefetchState.lastWarmed.size - 5000;
+      const it = prefetchState.lastWarmed.keys();
+      for (let i = 0; i < overflow; i++) prefetchState.lastWarmed.delete(it.next().value);
+    }
+  } catch (err) {
+    pushLog?.(`prefetch: parse failed for ${absPath} — ${err.message}`);
+  }
+}
+
+function startPrefetchWatcher() {
+  if (prefetchState.watcher) return;
+  if (mountState.status !== "mounted" || !mountState.mountPath) return;
+
+  const mountPath = mountState.mountPath;
+  try {
+    // macOS + Windows support recursive natively; on Linux fs.watch
+    // recursive landed in Node 20.
+    prefetchState.watcher = fssync.watch(
+      mountPath,
+      { recursive: true, persistent: false },
+      (eventType, filename) => {
+        if (eventType !== "change" || !filename) return;
+        if (!filename.endsWith(".prproj")) return;
+        const abs = path.join(mountPath, filename);
+        void handlePrprojWrite(abs, mountPath);
+      },
+    );
+    pushLog?.(`prefetch: watching ${mountPath} for .prproj writes`);
+  } catch (err) {
+    pushLog?.(`prefetch: watcher failed to attach — ${err.message}`);
+  }
+}
+
+function stopPrefetchWatcher() {
+  if (!prefetchState.watcher) return;
+  try {
+    prefetchState.watcher.close();
+  } catch {
+    // ignore
+  }
+  prefetchState.watcher = null;
+  prefetchState.queue.length = 0;
+  // Leave lastWarmed alone — if the feature is re-enabled in the same
+  // session, the dedupe window is still useful.
+}
+
 // ---- Feature loop reconciler -------------------------------------------------
 //
 // Single entry-point that looks at the current settings.features map and
@@ -352,8 +522,11 @@ async function reconcileFeatures() {
   if (flags.presence?.enabled) startPresenceLoop();
   else stopPresenceLoop();
 
-  // prefetch + lanCache + acls loops attach in follow-up commits. Their
-  // toggles persist now so the UI is wired before the implementations.
+  if (flags.prefetch?.enabled) startPrefetchWatcher();
+  else stopPrefetchWatcher();
+
+  // lanCache + acls loops attach in follow-up commits. Their toggles
+  // persist now so the UI is wired before the implementations.
 }
 
 ipcMain.handle("dialog:pick-folder", async () => {
@@ -422,9 +595,23 @@ let mountState = {
 };
 let mountChild = null;
 
+// Track the last status we emitted so we only kick the feature
+// reconciler on actual transitions (mounted ↔ unmounted), not on every
+// log line that flows through emitMountStatus.
+let lastEmittedMountStatus = null;
+
 function emitMountStatus() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("mount:status", { ...mountState, log: mountState.log.slice(-30) });
+  }
+  if (mountState.status !== lastEmittedMountStatus) {
+    lastEmittedMountStatus = mountState.status;
+    // Mount transitions affect which feature loops can run (presence and
+    // prefetch both need a live mountPath). Reconcile here so flipping the
+    // mount on or off picks up the right loop state without a settings save.
+    void reconcileFeatures().catch((err) => {
+      console.error("reconcileFeatures failed after mount status change:", err);
+    });
   }
 }
 
@@ -850,8 +1037,6 @@ ipcMain.handle("resolve:set-active-project", async (_event, { projectId }) => {
 // to open. Writing a Premiere-valid .prproj from scratch is harder than
 // it looks; round-tripping the original blob is the safe play.
 
-const zlib = require("node:zlib");
-
 ipcMain.handle("dialog:pick-prproj", async () => {
   const result = await dialog.showOpenDialog({
     properties: ["openFile"],
@@ -1256,6 +1441,7 @@ app.on("before-quit", async (event) => {
   // this client's lock row in Convex so the next "who's online" read
   // doesn't show a stale phantom.
   stopPresenceLoop();
+  stopPrefetchWatcher();
   if (mountChild) {
     event.preventDefault();
     pushLog("App quit — unmounting first.");
