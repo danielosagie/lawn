@@ -25,6 +25,7 @@ import {
 } from "@/components/CommandSearch";
 import { CreateProjectDialog } from "@/components/projects/CreateProjectDialog";
 import { CreateTeamDialog } from "@/components/teams/CreateTeamDialog";
+import { SnipMark } from "@/components/SnipMark";
 import { useSidebarState } from "@/lib/sidebarContext";
 import {
   projectPath,
@@ -118,7 +119,8 @@ export function DashboardSidebar() {
             chip (no inline name, since the projects list below
             already gives plenty of workspace context). */}
         <div className="px-3 pt-4 pb-3 flex items-center gap-2">
-          <Link to="/dashboard" className="flex-1 min-w-0">
+          <Link to="/dashboard" className="flex-1 min-w-0 flex items-center gap-2">
+            <SnipMark size={22} />
             <span className="font-black text-xl tracking-tighter text-[#1a1a1a]">
               snip<span className="text-[#FF6600]">.</span>
             </span>

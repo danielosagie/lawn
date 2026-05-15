@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { SnipMark } from "@/components/SnipMark";
 
 export function MarketingFooter() {
   return (
@@ -109,7 +110,10 @@ export function MarketingFooter() {
           </div>
         </div>
         <div className="border-t border-[#333] pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
-          <span className="font-black text-3xl tracking-tighter">snip.</span>
+          <div className="flex items-center gap-3">
+            <SnipMark size={32} />
+            <span className="font-black text-3xl tracking-tighter">snip.</span>
+          </div>
           <span className="text-sm text-[#888]">
             Video review for creative teams.
           </span>
