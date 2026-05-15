@@ -523,6 +523,333 @@ function stopPrefetchWatcher() {
   // session, the dedupe window is still useful.
 }
 
+// ---- Feature loop: LAN-shared cache ------------------------------------------
+//
+// Discover other snip Desktop instances on the same LAN via mDNS and expose
+// our mount tree over HTTP so teammates can pull project files directly
+// between machines instead of re-downloading them from S3/R2.
+//
+// What this v0 *actually does*:
+// - mDNS publish + browse (`_snip-cache._tcp.local`) so peers see each
+//   other within ~5s of startup. TXT record carries our clientId +
+//   mountPath so peers can correlate.
+// - HTTP server on the user-configured port serving /health (peer
+//   liveness ping), /list?dir=relative/path (JSON directory listing),
+//   and /file?path=relative/path (streamed file with directory-
+//   traversal guards).
+// - Peer-to-peer pull: renderer can call `lanCache:pull` to download a
+//   file from a specific peer into the user's Downloads folder. Uses
+//   LAN bandwidth instead of S3 egress; for a team that's already
+//   warmed a project, second/third editors don't re-pay for the
+//   bytes.
+//
+// What it does NOT do (so it's clear in the UI description):
+// - Transparent acceleration of rclone reads. rclone owns its VFS cache;
+//   getting reads through the mount to consult peers first requires
+//   a custom rclone backend or a FUSE shim — that's separate work.
+
+const http = require("node:http");
+const url = require("node:url");
+
+const lanCacheState = {
+  server: null,
+  bonjour: null,
+  service: null,
+  browser: null,
+  // clientId → { host, port, mountPath, lastSeen, name }
+  peers: new Map(),
+  peerSweepInterval: null,
+};
+
+function getLocalLanAddress() {
+  // Pick the first non-internal IPv4 address. Good enough for the
+  // typical single-NIC studio workstation; the bonjour client will
+  // advertise on all interfaces anyway.
+  const os = require("node:os");
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name] || []) {
+      if (iface.family === "IPv4" && !iface.internal) return iface.address;
+    }
+  }
+  return "127.0.0.1";
+}
+
+function emitPeersUpdate() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("lanCache:peers", listLanCachePeers());
+  }
+}
+
+function listLanCachePeers() {
+  // Drop peers we haven't seen in 30s (mDNS announce TTL + slack).
+  const cutoff = Date.now() - 30_000;
+  return [...lanCacheState.peers.values()].filter((p) => p.lastSeen > cutoff);
+}
+
+function safeJoinMountRelative(mountPath, rel) {
+  // Resolve the requested path against the mount root and assert the
+  // result is still inside the mount. Blocks ".." escapes and absolute
+  // injection.
+  const cleaned = (rel || "").replace(/^[/\\]+/, "");
+  const abs = path.resolve(mountPath, cleaned);
+  const rootWithSep = mountPath.endsWith(path.sep) ? mountPath : `${mountPath}${path.sep}`;
+  if (abs !== mountPath && !abs.startsWith(rootWithSep)) {
+    return null;
+  }
+  return abs;
+}
+
+function handleLanCacheRequest(req, res, mountPath, clientId) {
+  // CORS: allow any origin (these are peers on a trusted LAN; the user
+  // opted in via Settings). We don't accept arbitrary methods so this
+  // surface stays tight.
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("X-Snip-Client", clientId);
+
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    res.writeHead(405);
+    return res.end("Method not allowed");
+  }
+
+  const parsed = url.parse(req.url, true);
+  const route = parsed.pathname;
+
+  if (route === "/health") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ ok: true, clientId, mountPath }));
+  }
+
+  if (route === "/list") {
+    const rel = String(parsed.query.dir || "");
+    const abs = safeJoinMountRelative(mountPath, rel);
+    if (!abs) {
+      res.writeHead(400);
+      return res.end("Bad path");
+    }
+    fssync.readdir(abs, { withFileTypes: true }, (err, entries) => {
+      if (err) {
+        res.writeHead(404);
+        return res.end("Not found");
+      }
+      // Cap the listing so a peer can't DoS us by listing a 200k-file dir.
+      const capped = entries.slice(0, 500).map((d) => ({
+        name: d.name,
+        isDirectory: d.isDirectory(),
+      }));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ dir: rel, entries: capped, truncated: entries.length > 500 }));
+    });
+    return;
+  }
+
+  if (route === "/file") {
+    const rel = String(parsed.query.path || "");
+    const abs = safeJoinMountRelative(mountPath, rel);
+    if (!abs) {
+      res.writeHead(400);
+      return res.end("Bad path");
+    }
+    fssync.stat(abs, (err, stat) => {
+      if (err || !stat.isFile()) {
+        res.writeHead(404);
+        return res.end("Not found");
+      }
+      res.writeHead(200, {
+        "Content-Type": "application/octet-stream",
+        "Content-Length": stat.size,
+        "Content-Disposition": `attachment; filename="${path.basename(abs)}"`,
+      });
+      if (req.method === "HEAD") return res.end();
+      fssync.createReadStream(abs).pipe(res);
+    });
+    return;
+  }
+
+  res.writeHead(404);
+  res.end("Not found");
+}
+
+function startLanCacheServer() {
+  if (lanCacheState.server) return;
+  const mountPath = mountState.mountPath;
+  if (!mountPath || mountState.status !== "mounted") return;
+
+  // Read fresh settings inline so the user can change the port + toggle
+  // and have it take effect without the loop restarting.
+  return loadSettings().then(async (settings) => {
+    const port = settings.features?.lanCache?.port || 17900;
+    const clientId = getClientId();
+
+    const server = http.createServer((req, res) =>
+      handleLanCacheRequest(req, res, mountPath, clientId),
+    );
+
+    await new Promise((resolve, reject) => {
+      const onError = (err) => {
+        pushLog?.(`lanCache: server bind failed on port ${port} — ${err.message}`);
+        reject(err);
+      };
+      server.once("error", onError);
+      server.listen(port, () => {
+        server.off("error", onError);
+        pushLog?.(`lanCache: serving ${mountPath} on port ${port}`);
+        resolve();
+      });
+    }).catch(() => {
+      // Bind failure (port in use, perms) — leave the feature inactive
+      // until the user picks a different port and re-saves.
+      return null;
+    });
+
+    if (server.listening) {
+      lanCacheState.server = server;
+      // Start mDNS only AFTER the HTTP server is bound, so peers that
+      // discover us can actually connect on the advertised port.
+      startMdnsService(port, clientId, mountPath);
+    }
+  });
+}
+
+function stopLanCacheServer() {
+  if (lanCacheState.server) {
+    try {
+      lanCacheState.server.close();
+    } catch {
+      // ignore
+    }
+    lanCacheState.server = null;
+  }
+  stopMdnsService();
+}
+
+function startMdnsService(port, clientId, mountPath) {
+  if (lanCacheState.bonjour) return;
+  let Bonjour;
+  try {
+    ({ Bonjour } = require("bonjour-service"));
+  } catch (err) {
+    pushLog?.(`lanCache: bonjour-service unavailable — ${err.message}`);
+    return;
+  }
+  lanCacheState.bonjour = new Bonjour();
+
+  // Publish.
+  lanCacheState.service = lanCacheState.bonjour.publish({
+    name: `snip-cache-${clientId.slice(0, 8)}`,
+    type: "snip-cache",
+    protocol: "tcp",
+    port,
+    txt: {
+      clientId,
+      mountPath,
+      version: "0",
+    },
+  });
+
+  // Browse.
+  lanCacheState.browser = lanCacheState.bonjour.find(
+    { type: "snip-cache", protocol: "tcp" },
+    (svc) => {
+      if (!svc || !svc.txt) return;
+      const peerClientId = svc.txt.clientId;
+      // Don't list ourselves.
+      if (!peerClientId || peerClientId === clientId) return;
+      const host = (svc.referer && svc.referer.address) || svc.host;
+      lanCacheState.peers.set(peerClientId, {
+        clientId: peerClientId,
+        name: svc.name,
+        host,
+        port: svc.port,
+        mountPath: svc.txt.mountPath || "",
+        lastSeen: Date.now(),
+      });
+      emitPeersUpdate();
+    },
+  );
+
+  if (!lanCacheState.peerSweepInterval) {
+    // Drop stale peers every 15s. Pure side-effect on the in-memory map
+    // — the IPC `lanCache:peers` already filters by lastSeen, but the
+    // sweep keeps the map from growing unbounded across a long session.
+    lanCacheState.peerSweepInterval = setInterval(() => {
+      const before = lanCacheState.peers.size;
+      const cutoff = Date.now() - 60_000;
+      for (const [key, peer] of lanCacheState.peers) {
+        if (peer.lastSeen < cutoff) lanCacheState.peers.delete(key);
+      }
+      if (lanCacheState.peers.size !== before) emitPeersUpdate();
+    }, 15_000);
+  }
+}
+
+function stopMdnsService() {
+  if (lanCacheState.peerSweepInterval) {
+    clearInterval(lanCacheState.peerSweepInterval);
+    lanCacheState.peerSweepInterval = null;
+  }
+  try {
+    if (lanCacheState.browser) lanCacheState.browser.stop();
+  } catch {
+    // ignore
+  }
+  try {
+    if (lanCacheState.service) lanCacheState.service.stop?.();
+  } catch {
+    // ignore
+  }
+  try {
+    if (lanCacheState.bonjour) lanCacheState.bonjour.destroy();
+  } catch {
+    // ignore
+  }
+  lanCacheState.bonjour = null;
+  lanCacheState.service = null;
+  lanCacheState.browser = null;
+  lanCacheState.peers.clear();
+  emitPeersUpdate();
+}
+
+ipcMain.handle("lanCache:peers", async () => listLanCachePeers());
+
+ipcMain.handle("lanCache:listFromPeer", async (_event, { clientId, dir }) => {
+  const peer = lanCacheState.peers.get(clientId);
+  if (!peer) throw new Error("Peer not found.");
+  const u = `http://${peer.host}:${peer.port}/list?dir=${encodeURIComponent(dir || "")}`;
+  const resp = await fetch(u);
+  if (!resp.ok) throw new Error(`Peer responded ${resp.status}`);
+  return resp.json();
+});
+
+ipcMain.handle("lanCache:pullFromPeer", async (_event, { clientId, remotePath }) => {
+  const peer = lanCacheState.peers.get(clientId);
+  if (!peer) throw new Error("Peer not found.");
+  const u = `http://${peer.host}:${peer.port}/file?path=${encodeURIComponent(remotePath)}`;
+  // Save into ~/Downloads so the user finds it predictably.
+  const dest = path.join(
+    app.getPath("downloads"),
+    `${path.basename(remotePath)}.from-${peer.name || "peer"}`,
+  );
+  const resp = await fetch(u);
+  if (!resp.ok) throw new Error(`Peer responded ${resp.status}`);
+  // Node's response body is a web stream; pipe it through a writable.
+  const writer = fssync.createWriteStream(dest);
+  const reader = resp.body.getReader();
+  let bytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.length;
+    if (!writer.write(value)) {
+      await new Promise((r) => writer.once("drain", r));
+    }
+  }
+  await new Promise((resolve, reject) => {
+    writer.end((err) => (err ? reject(err) : resolve()));
+  });
+  return { ok: true, path: dest, bytes };
+});
+
 // ---- Feature loop reconciler -------------------------------------------------
 //
 // Single entry-point that looks at the current settings.features map and
@@ -540,8 +867,12 @@ async function reconcileFeatures() {
   if (flags.prefetch?.enabled) startPrefetchWatcher();
   else stopPrefetchWatcher();
 
-  // lanCache + acls loops attach in follow-up commits. Their toggles
-  // persist now so the UI is wired before the implementations.
+  if (flags.lanCache?.enabled) await startLanCacheServer();
+  else stopLanCacheServer();
+
+  // acls loop is data-layer-only and attaches in the next commit; the
+  // toggle gates the renderer ACLs panel rather than a background loop
+  // here.
 }
 
 ipcMain.handle("dialog:pick-folder", async () => {
@@ -1457,6 +1788,7 @@ app.on("before-quit", async (event) => {
   // doesn't show a stale phantom.
   stopPresenceLoop();
   stopPrefetchWatcher();
+  stopLanCacheServer();
   if (mountChild) {
     event.preventDefault();
     pushLog("App quit — unmounting first.");

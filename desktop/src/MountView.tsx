@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ConvexClient } from "convex/browser";
-import { api, DesktopSettings, MountPrereqs, MountState } from "./api";
+import { api, DesktopSettings, LanCachePeer, MountPrereqs, MountState } from "./api";
 import { useConvexQuery } from "./useConvex";
 
 interface PresenceLock {
@@ -230,6 +230,8 @@ export function MountView({ settings, client }: Props) {
         />
       ) : null}
 
+      {settings.features.lanCache.enabled ? <LanCachePeersPanel /> : null}
+
       <p style={{ fontSize: 11, color: "#888", marginTop: 14 }}>
         See <code>docs/MOUNTING.md</code> for performance tuning + alternatives
         (Mountpoint for S3, LucidLink). Mounts use FUSE under the hood — same
@@ -434,6 +436,200 @@ function LivePresencePanel({
           ))}
         </ul>
       )}
+    </section>
+  );
+}
+
+function LanCachePeersPanel() {
+  const [peers, setPeers] = useState<LanCachePeer[]>([]);
+  // The peer browser is per-peer ("Browse alice-mac's mount"). null
+  // means the top-level peer list is showing.
+  const [browsing, setBrowsing] = useState<LanCachePeer | null>(null);
+  const [dir, setDir] = useState<string>("");
+  const [entries, setEntries] = useState<{ name: string; isDirectory: boolean }[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lastPullPath, setLastPullPath] = useState<string | null>(null);
+
+  useEffect(() => {
+    void api.lanCache.peers().then(setPeers);
+    return api.lanCache.onPeers(setPeers);
+  }, []);
+
+  useEffect(() => {
+    if (!browsing) return;
+    setBusy(true);
+    setError(null);
+    api.lanCache
+      .listFromPeer({ clientId: browsing.clientId, dir })
+      .then((r) => setEntries(r.entries))
+      .catch((e) => setError(e.message))
+      .finally(() => setBusy(false));
+  }, [browsing, dir]);
+
+  return (
+    <section style={{ border: "2px solid #1a1a1a", marginTop: 14, padding: 14 }}>
+      <header
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "baseline",
+          marginBottom: 10,
+        }}
+      >
+        <strong style={{ fontSize: 13 }}>LAN PEERS</strong>
+        <span style={{ fontSize: 11, color: "#888", fontFamily: "monospace" }}>
+          {peers.length} discovered
+        </span>
+      </header>
+
+      {!browsing ? (
+        peers.length === 0 ? (
+          <p style={{ fontSize: 11, color: "#888", margin: 0 }}>
+            No other snip Desktop instances visible on this network yet. mDNS
+            discovery can take 5–10s after a peer comes online.
+          </p>
+        ) : (
+          <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+            {peers.map((p) => (
+              <li
+                key={p.clientId}
+                style={{
+                  borderTop: "1px solid #ccc",
+                  padding: "8px 0",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 12 }}>{p.name}</div>
+                  <div style={{ fontSize: 10, color: "#666", fontFamily: "monospace" }}>
+                    {p.host}:{p.port} · {p.mountPath || "(no mount)"}
+                  </div>
+                </div>
+                <button
+                  className="ghost"
+                  onClick={() => {
+                    setBrowsing(p);
+                    setDir("");
+                    setEntries([]);
+                  }}
+                  disabled={!p.mountPath}
+                >
+                  Browse
+                </button>
+              </li>
+            ))}
+          </ul>
+        )
+      ) : (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <button
+              className="ghost"
+              onClick={() => {
+                setBrowsing(null);
+                setDir("");
+                setEntries([]);
+                setError(null);
+              }}
+            >
+              ← back
+            </button>
+            <span style={{ fontWeight: 700, fontSize: 12 }}>{browsing.name}</span>
+            <span style={{ fontFamily: "monospace", fontSize: 11, color: "#666" }}>
+              /{dir}
+            </span>
+          </div>
+          {dir ? (
+            <button
+              className="ghost"
+              onClick={() => setDir(dir.split("/").slice(0, -1).join("/"))}
+              style={{ fontSize: 11, marginBottom: 6 }}
+            >
+              ../
+            </button>
+          ) : null}
+          {error ? (
+            <p style={{ fontSize: 11, color: "#7f1d1d", margin: "0 0 6px" }}>{error}</p>
+          ) : null}
+          {busy ? (
+            <p style={{ fontSize: 11, color: "#888", margin: 0 }}>Loading…</p>
+          ) : (
+            <ul
+              style={{
+                margin: 0,
+                padding: 0,
+                listStyle: "none",
+                maxHeight: 240,
+                overflowY: "auto",
+                border: "1px solid #ccc",
+              }}
+            >
+              {entries.map((e) => (
+                <li
+                  key={e.name}
+                  style={{
+                    padding: "6px 10px",
+                    borderBottom: "1px solid #eee",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    fontFamily: "monospace",
+                    fontSize: 11,
+                  }}
+                >
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {e.isDirectory ? "📁 " : ""}
+                    {e.name}
+                  </span>
+                  {e.isDirectory ? (
+                    <button
+                      className="ghost"
+                      onClick={() => setDir(dir ? `${dir}/${e.name}` : e.name)}
+                    >
+                      open
+                    </button>
+                  ) : (
+                    <button
+                      className="ghost"
+                      onClick={async () => {
+                        setError(null);
+                        setLastPullPath(null);
+                        try {
+                          const remotePath = dir ? `${dir}/${e.name}` : e.name;
+                          const r = await api.lanCache.pullFromPeer({
+                            clientId: browsing.clientId,
+                            remotePath,
+                          });
+                          setLastPullPath(r.path);
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : String(err));
+                        }
+                      }}
+                    >
+                      pull
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          {lastPullPath ? (
+            <p style={{ fontSize: 11, color: "#2d5a2d", margin: "8px 0 0" }}>
+              Saved to <code>{lastPullPath}</code>
+            </p>
+          ) : null}
+        </div>
+      )}
+
+      <p style={{ fontSize: 10, color: "#888", margin: "10px 0 0", lineHeight: 1.5 }}>
+        Peer-to-peer file pulls over LAN — saves S3 egress for files a
+        teammate has already downloaded. Rclone reads through the mount
+        still consult S3 directly; transparent peer caching would need a
+        custom rclone backend.
+      </p>
     </section>
   );
 }

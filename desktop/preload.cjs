@@ -47,4 +47,14 @@ contextBridge.exposeInMainWorld("api", {
     snapshot: (args) => ipcRenderer.invoke("premiere:snapshot", args),
     restoreDownload: (args) => ipcRenderer.invoke("premiere:restore-download", args),
   },
+  lanCache: {
+    peers: () => ipcRenderer.invoke("lanCache:peers"),
+    listFromPeer: (args) => ipcRenderer.invoke("lanCache:listFromPeer", args),
+    pullFromPeer: (args) => ipcRenderer.invoke("lanCache:pullFromPeer", args),
+    onPeers: (handler) => {
+      const listener = (_event, payload) => handler(payload);
+      ipcRenderer.on("lanCache:peers", listener);
+      return () => ipcRenderer.off("lanCache:peers", listener);
+    },
+  },
 });

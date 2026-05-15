@@ -127,6 +127,27 @@ interface DesktopApi {
       suggestedName?: string;
     }) => Promise<{ ok: boolean; cancelled?: boolean; path?: string }>;
   };
+  lanCache: {
+    peers: () => Promise<LanCachePeer[]>;
+    listFromPeer: (args: {
+      clientId: string;
+      dir?: string;
+    }) => Promise<{ dir: string; entries: { name: string; isDirectory: boolean }[]; truncated: boolean }>;
+    pullFromPeer: (args: {
+      clientId: string;
+      remotePath: string;
+    }) => Promise<{ ok: boolean; path: string; bytes: number }>;
+    onPeers: (handler: (peers: LanCachePeer[]) => void) => () => void;
+  };
+}
+
+export interface LanCachePeer {
+  clientId: string;
+  name: string;
+  host: string;
+  port: number;
+  mountPath: string;
+  lastSeen: number;
 }
 
 declare global {

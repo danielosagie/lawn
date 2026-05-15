@@ -191,8 +191,8 @@ export function SettingsView({ settings, onChange, firstRun }: Props) {
           onChange={(enabled) => setFeature("prefetch", { enabled })}
         />
         <FeatureToggle
-          label="LAN-shared cache"
-          description="Peers on the same network serve already-fetched clips directly over LAN. Discovers other snip instances via mDNS."
+          label="LAN peer cache"
+          description="Discover other snip Desktop instances on this network via mDNS and pull project files between machines over LAN (saves S3 egress for already-downloaded files). See the LAN Peers panel in the Mount tab once enabled."
           enabled={draft.features.lanCache.enabled}
           onChange={(enabled) => setFeature("lanCache", { enabled })}
           rightSlot={
