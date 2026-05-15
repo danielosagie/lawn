@@ -559,7 +559,29 @@ const lanCacheState = {
   // clientId → { host, port, mountPath, lastSeen, name }
   peers: new Map(),
   peerSweepInterval: null,
+  // Second rclone process — `rclone serve http <cacheDir>` —
+  // exposing this client's vfs cache directory to peers so their
+  // union remotes can fetch already-cached files at LAN speed.
+  cacheServeChild: null,
+  cacheServeLog: [],
 };
+
+// Wait up to `ms` for mDNS to surface any peer, returning early as
+// soon as the first peer shows up. Used by the mount-start flow so
+// the initial mount has the latest peer set when constructing the
+// rclone union remote.
+function waitForLanCachePeers(ms) {
+  return new Promise((resolve) => {
+    if (lanCacheState.peers.size > 0) return resolve();
+    const t0 = Date.now();
+    const tick = setInterval(() => {
+      if (lanCacheState.peers.size > 0 || Date.now() - t0 > ms) {
+        clearInterval(tick);
+        resolve();
+      }
+    }, 200);
+  });
+}
 
 function getLocalLanAddress() {
   // Pick the first non-internal IPv4 address. Good enough for the
@@ -707,6 +729,11 @@ function startLanCacheServer() {
       // Start mDNS only AFTER the HTTP server is bound, so peers that
       // discover us can actually connect on the advertised port.
       startMdnsService(port, clientId, mountPath);
+      // Start the rclone-serve subprocess on port+1 so peers' union
+      // remotes can fetch our cached files transparently. Safe to call
+      // before the mount is up — the serve binds to an empty cache
+      // directory and starts serving as files populate.
+      startRcloneCacheServe(port + 1);
     }
   });
 }
@@ -720,6 +747,7 @@ function stopLanCacheServer() {
     }
     lanCacheState.server = null;
   }
+  stopRcloneCacheServe();
   stopMdnsService();
 }
 
@@ -734,7 +762,10 @@ function startMdnsService(port, clientId, mountPath) {
   }
   lanCacheState.bonjour = new Bonjour();
 
-  // Publish.
+  // Publish. The `port` we advertise is the browse server (our
+  // custom JSON HTTP). The TXT record's `cache_port` field carries
+  // the rclone-serve port for transparent peer caching — peers'
+  // union remotes use that.
   lanCacheState.service = lanCacheState.bonjour.publish({
     name: `snip-cache-${clientId.slice(0, 8)}`,
     type: "snip-cache",
@@ -743,7 +774,8 @@ function startMdnsService(port, clientId, mountPath) {
     txt: {
       clientId,
       mountPath,
-      version: "0",
+      version: "1",
+      cache_port: String(port + 1),
     },
   });
 
@@ -781,6 +813,75 @@ function startMdnsService(port, clientId, mountPath) {
       if (lanCacheState.peers.size !== before) emitPeersUpdate();
     }, 15_000);
   }
+}
+
+// Spawn the second rclone process — `rclone serve http <cacheDir>` —
+// which exposes our VFS cache directory over HTTP so peers' union
+// remotes can fetch already-cached files from us at LAN speed.
+//
+// We serve on the user's lanCache port + 1 so it doesn't collide with
+// the custom browse-server above (which keeps its own port for the
+// renderer's "Browse peer" UI). Peers read both ports from our mDNS
+// TXT record.
+function startRcloneCacheServe(port) {
+  if (lanCacheState.cacheServeChild) return;
+  if (mountState.status !== "mounted") return;
+  const cacheDir = path.join(SETTINGS_DIR, "rclone-cache");
+  // The VFS cache layout is `<cache-dir>/vfs/<remote>/<bucket>/<path>`.
+  // We serve everything under `vfs/videoinfra/` so peers see paths
+  // matching what their rclone HTTP-remote expects.
+  const serveRoot = path.join(cacheDir, "vfs", "videoinfra");
+  // Ensure it exists so the rclone serve doesn't crash immediately on
+  // a never-mounted client; once the mount populates it, peer reads
+  // start working.
+  try {
+    fssync.mkdirSync(serveRoot, { recursive: true });
+  } catch {
+    // ignore
+  }
+  const args = [
+    "serve",
+    "http",
+    serveRoot,
+    "--addr",
+    `0.0.0.0:${port}`,
+    "--read-only",
+    // No auth for v0 — assumes trusted LAN, same trust model as the
+    // existing browse server. A future iteration will mint a per-team
+    // token via Convex and require --user/--pass.
+    "--vv",
+  ];
+  try {
+    lanCacheState.cacheServeChild = spawn("rclone", args, {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (err) {
+    pushLog?.(`lanCache: rclone serve failed to start — ${err.message}`);
+    return;
+  }
+  pushLog?.(`lanCache: rclone serve http on ${port} → ${serveRoot}`);
+  const onLog = (chunk) => {
+    const line = chunk.toString().trim();
+    if (!line) return;
+    lanCacheState.cacheServeLog.push(line);
+    if (lanCacheState.cacheServeLog.length > 50) lanCacheState.cacheServeLog.shift();
+  };
+  lanCacheState.cacheServeChild.stdout?.on("data", onLog);
+  lanCacheState.cacheServeChild.stderr?.on("data", onLog);
+  lanCacheState.cacheServeChild.on("exit", (code) => {
+    pushLog?.(`lanCache: rclone serve exited (code ${code})`);
+    lanCacheState.cacheServeChild = null;
+  });
+}
+
+function stopRcloneCacheServe() {
+  if (!lanCacheState.cacheServeChild) return;
+  try {
+    lanCacheState.cacheServeChild.kill("SIGTERM");
+  } catch {
+    // ignore
+  }
+  lanCacheState.cacheServeChild = null;
 }
 
 function stopMdnsService() {
@@ -1056,6 +1157,94 @@ async function startMount({ mountPath } = {}) {
     RCLONE_CONFIG_VIDEOINFRA_ACL: "private",
   };
 
+  // ── Optional: layer in LAN-peer caches as the first upstreams ──
+  //
+  // When `features.lanCache.enabled` is on AND there are peers
+  // currently advertised via mDNS, we build a rclone `union` remote
+  // whose upstreams are each peer's `rclone serve http` (the second
+  // process started by startRcloneCacheServe below) followed by the
+  // S3 remote. Reads consult peers first (LAN speed, no S3 egress);
+  // a peer miss falls through to S3 automatically.
+  //
+  // We use first-found read policy + epff (existing-path-first-
+  // found) for creates so new files always land on S3.
+  let mountTarget = `videoinfra:${s.bucket}/projects`;
+  if (settings.features?.lanCache?.enabled) {
+    // Wait briefly for mDNS to populate peers — this is a no-op if
+    // the LAN cache loop was already running and has peers ready.
+    await waitForLanCachePeers(3_000);
+    const peers = listLanCachePeers().filter(
+      (p) => p.clientId !== getClientId(),
+    );
+    if (peers.length > 0) {
+      const upstreams = [];
+      peers.forEach((peer, i) => {
+        const name = `lanpeer${i}`;
+        const cachePort = (peer.port || 0) + 1; // by convention, port+1 is the rclone serve
+        env[`RCLONE_CONFIG_${name.toUpperCase()}_TYPE`] = "http";
+        env[`RCLONE_CONFIG_${name.toUpperCase()}_URL`] =
+          `http://${peer.host}:${cachePort}/${s.bucket}/projects/`;
+        // Short timeouts so a slow / dead peer doesn't stall reads.
+        env[`RCLONE_CONFIG_${name.toUpperCase()}_HEADERS`] = "";
+        upstreams.push(`${name}:`);
+      });
+      upstreams.push("videoinfra:" + s.bucket + "/projects");
+      env.RCLONE_CONFIG_LANUNION_TYPE = "union";
+      env.RCLONE_CONFIG_LANUNION_UPSTREAMS = upstreams.join(" ");
+      env.RCLONE_CONFIG_LANUNION_ACTION_POLICY = "epff"; // existing-path-first-found
+      env.RCLONE_CONFIG_LANUNION_SEARCH_POLICY = "ff"; // first-found on reads
+      env.RCLONE_CONFIG_LANUNION_CREATE_POLICY = "epff"; // creates → first writeable
+      mountTarget = "lanunion:";
+      pushLog(`LAN union: ${peers.length} peer(s) ahead of S3 — ${upstreams.join(", ")}`);
+    } else {
+      pushLog(`LAN cache enabled, no peers visible — mounting plain S3.`);
+    }
+  }
+
+  // Pin the cache dir so the second rclone process (the cache server)
+  // knows where to find our cached files to expose to peers.
+  const cacheDir = path.join(SETTINGS_DIR, "rclone-cache");
+  await fs.mkdir(cacheDir, { recursive: true });
+
+  // ── Optional: --filter-from from Convex-stored folder permissions ──
+  //
+  // When `features.acls.enabled` is on, fetch the user's effective
+  // rules from Convex (one + or - line per matching folderPermissions
+  // grant), write them to a file, and pass `--filter-from` to rclone.
+  // The FUSE layer then hides files the user isn't entitled to —
+  // Finder/Premiere/Resolve all see a filtered view of the bucket.
+  let filterFromArgs = [];
+  if (settings.features?.acls?.enabled) {
+    const filterPath = path.join(SETTINGS_DIR, "rclone-filters.txt");
+    try {
+      const rules = await convexCall(
+        "query",
+        "desktopAcls:getEffectiveFilters",
+        {},
+      );
+      if (Array.isArray(rules) && rules.length > 0) {
+        const lines = rules.map((r) => `${r.action} ${r.pattern}`);
+        await fs.writeFile(filterPath, lines.join("\n") + "\n");
+        filterFromArgs = ["--filter-from", filterPath];
+        pushLog(`ACLs: applying ${rules.length} filter rule(s) from Convex`);
+      } else {
+        pushLog(`ACLs enabled, no grants matched — mount stays default-allow.`);
+      }
+    } catch (err) {
+      // Fail-CLOSED. If the user enabled ACL enforcement and we can't
+      // fetch the rules (Convex down, token expired, network blip),
+      // the right behaviour is to hide everything until we recover —
+      // not silently mount full-access. We write a deny-all filter
+      // file and feed it to rclone; the FUSE mount comes up showing
+      // an empty bucket, and the log line tells the user why.
+      await fs.writeFile(filterPath, "- *\n");
+      filterFromArgs = ["--filter-from", filterPath];
+      pushLog(
+        `ACLs: filter fetch failed (${err.message}) — mounting deny-all to fail closed. Fix the Convex connection and re-mount.`,
+      );
+    }
+  }
+
   // VFS tuned for LucidLink-style streaming on NLE workloads:
   //  • vfs-cache-mode full   — cache read blocks on disk so revisits are local
   //  • multi-thread-streams  — parallel range reads on big files (the single
@@ -1070,9 +1259,13 @@ async function startMount({ mountPath } = {}) {
   // editors can copy/paste it for ad-hoc terminal mounts.
   const args = [
     "mount",
-    `videoinfra:${s.bucket}/projects`,
+    mountTarget,
     targetPath,
+    // ACL filter rules (when enabled). The flag is appended once via
+    // spread to keep an empty list out of argv when ACLs are off.
+    ...filterFromArgs,
     // Cache strategy
+    "--cache-dir", cacheDir,
     "--vfs-cache-mode", "full",
     "--vfs-cache-max-size", "100G",
     "--vfs-cache-max-age", "720h",

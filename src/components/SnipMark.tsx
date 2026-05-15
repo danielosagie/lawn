@@ -1,11 +1,15 @@
+import { Film } from "lucide-react";
+
 /**
- * Brand mark — the Lucide Film glyph on the snip orange (#FF6600).
- *
- * Same identity as `public/favicon.svg` and the macOS app icon
- * (generated from `public/grass-logo.svg`). Use this anywhere a "logo
- * spot" appears: nav headers, sidebar, footer, auth screen, etc.
+ * Brand mark — the actual Lucide React `Film` icon on the snip orange
+ * (#FF6600). Same identity as `public/favicon.svg` and the macOS app
+ * icon (generated from `public/grass-logo.svg`). Use this anywhere a
+ * "logo spot" appears: nav headers, sidebar, footer, auth screen.
  * Wordmark + mark together is the lockup; the mark alone works as a
  * small avatar/affordance.
+ *
+ * Brutalist square edges per CLAUDE.md design language — no rounded
+ * corners on the orange background.
  */
 
 interface SnipMarkProps {
@@ -16,34 +20,31 @@ interface SnipMarkProps {
 }
 
 export function SnipMark({ size = 24, className }: SnipMarkProps) {
+  // The Film glyph sits at ~66% of the box; the rest is the orange
+  // bezel. Stroke a touch heavier than Lucide's default 2 so the
+  // glyph reads at small sizes (sidebar header, nav).
+  const iconSize = Math.round(size * 0.66);
   return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      width={size}
-      height={size}
+    <span
+      className={className}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: size,
+        height: size,
+        backgroundColor: "#FF6600",
+        flexShrink: 0,
+      }}
       role="img"
       aria-label="snip"
-      className={className}
     >
-      <rect width="24" height="24" rx="4" fill="#FF6600" />
-      <g
-        fill="none"
-        stroke="#f0f0e8"
-        strokeWidth={1.5}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        transform="translate(3 3) scale(0.75)"
-      >
-        <rect width="18" height="18" x="3" y="3" rx="2" />
-        <path d="M7 3v18" />
-        <path d="M3 7.5h4" />
-        <path d="M3 12h18" />
-        <path d="M3 16.5h4" />
-        <path d="M17 3v18" />
-        <path d="M17 7.5h4" />
-        <path d="M17 16.5h4" />
-      </g>
-    </svg>
+      <Film
+        size={iconSize}
+        strokeWidth={2.5}
+        color="#f0f0e8"
+        absoluteStrokeWidth
+      />
+    </span>
   );
 }
