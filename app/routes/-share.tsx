@@ -178,11 +178,26 @@ export default function SharePage() {
   const reloadCounter = useRef(0);
   const [reloadTrigger, setReloadTrigger] = useState(0);
   const paidFlag = Boolean(unlockState?.paid);
+  // Tokens we've already tried and got "Share grant invalid or expired" for.
+  // Without this gate, the effect below re-fires whenever any of its 10
+  // useQuery/useAction deps re-resolve (notably `summary` and `bundleItems`,
+  // which Convex re-emits on subscription ticks), and we end up hammering
+  // the action with the same dead token — dozens per second under network
+  // flutter. Keying by `${token}::${itemId}` lets a paid checkout's new
+  // grant still go through after the user reloads.
+  const failedGrantKeysRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!grantToken) {
       setPlaybackSession(null);
       setPlaybackError(null);
+      return;
+    }
+
+    const failureKey = `${grantToken}::${activeItemId ?? ""}`;
+    if (failedGrantKeysRef.current.has(failureKey)) {
+      // Already known dead. Show the error once and stop calling.
+      setIsLoadingPlayback(false);
       return;
     }
 
@@ -272,9 +287,16 @@ export default function SharePage() {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setPlaybackError(
-          err instanceof Error ? err.message : "Unable to load playback session.",
-        );
+        const message =
+          err instanceof Error ? err.message : "Unable to load playback session.";
+        // Latch terminal-state errors so the next effect-fire on the same
+        // token short-circuits instead of re-hitting the action. The
+        // exact error string comes from
+        // convex/videoActions.ts → "Share grant invalid or expired."
+        if (message.includes("Share grant invalid or expired")) {
+          failedGrantKeysRef.current.add(failureKey);
+        }
+        setPlaybackError(message);
       })
       .finally(() => {
         if (cancelled) return;
