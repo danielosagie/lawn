@@ -70,17 +70,33 @@ jobs:
         working-directory: desktop
         run: bun run build:renderer
 
+      - name: Configure code signing
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID_SECRET: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD_SECRET: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID_SECRET: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [[ -n "$MACOS_CERTIFICATE" ]]; then
+            # Use the multiline-safe heredoc form so a base64 cert with
+            # embedded newlines (the default `base64` line-wraps at col 76)
+            # makes it through the env file intact.
+            delim="EOF_$(openssl rand -hex 8)"
+            {
+              printf '%s<<%s\n%s\n%s\n' CSC_LINK "$delim" "$MACOS_CERTIFICATE" "$delim"
+              printf '%s<<%s\n%s\n%s\n' CSC_KEY_PASSWORD "$delim" "$MACOS_CERTIFICATE_PASSWORD" "$delim"
+              printf '%s<<%s\n%s\n%s\n' APPLE_ID "$delim" "$APPLE_ID_SECRET" "$delim"
+              printf '%s<<%s\n%s\n%s\n' APPLE_APP_SPECIFIC_PASSWORD "$delim" "$APPLE_APP_SPECIFIC_PASSWORD_SECRET" "$delim"
+              printf '%s<<%s\n%s\n%s\n' APPLE_TEAM_ID "$delim" "$APPLE_TEAM_ID_SECRET" "$delim"
+            } >> "$GITHUB_ENV"
+          else
+            echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+            echo "No MACOS_CERTIFICATE secret set — building unsigned DMG."
+          fi
+
       - name: Build DMG (${{ matrix.arch }})
         working-directory: desktop
-        env:
-          # Code signing — leave unset to produce an unsigned DMG. The
-          # workflow exits 0 either way; the next step uploads whatever
-          # was produced.
-          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}
-          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: bunx electron-builder --mac dmg --${{ matrix.arch }}
 
       - name: Upload DMG artifact
