@@ -1,16 +1,13 @@
-import { useEffect, useState } from "react";
-import type { ConvexClient } from "convex/browser";
+import { useState } from "react";
 import { api, DesktopSettings } from "./api";
-import { callMutation, useConvexQuery } from "./useConvex";
 
 interface Props {
   settings: DesktopSettings;
   onChange: (next: DesktopSettings) => Promise<void>;
-  client?: ConvexClient | null;
   firstRun?: boolean;
 }
 
-export function SettingsView({ settings, onChange, client, firstRun }: Props) {
+export function SettingsView({ settings, onChange, firstRun }: Props) {
   const [draft, setDraft] = useState<DesktopSettings>(settings);
   const [saving, setSaving] = useState(false);
 
@@ -224,24 +221,11 @@ export function SettingsView({ settings, onChange, client, firstRun }: Props) {
         />
         <FeatureToggle
           label="Folder ACLs"
-          description="Per-folder team permissions surface in the UI. Storage-level enforcement (scoped STS credentials) is separate work."
+          description="Enforce team-scoped folder permissions at mount time. Grants are configured in the web app (Team settings → Folder permissions). Enabling here makes snip Desktop fetch your effective allow-list and pass it as an rclone --filter-from when mounting."
           enabled={draft.features.acls.enabled}
           onChange={(enabled) => setFeature("acls", { enabled })}
         />
       </Section>
-
-      {draft.features.acls.enabled ? (
-        <Section title="Folder ACLs">
-          <p style={{ fontSize: 12, color: "#1a1a1a", margin: "0 0 10px" }}>
-            Per-folder team permission grants — admins set who can access
-            which subtree of the mount. Recorded here in Convex; the
-            desktop client uses these to decide what to show in the
-            mount browser. Storage-side enforcement (scoped STS
-            credentials at S3) is separate infrastructure work.
-          </p>
-          <FolderAclsPanel client={client ?? null} />
-        </Section>
-      ) : null}
 
       <Section title="Mount as drive (advanced)">
         <p style={{ fontSize: 12, color: "#1a1a1a", margin: "0 0 8px" }}>
@@ -400,218 +384,3 @@ function FeatureToggle({
   );
 }
 
-interface TeamSummary {
-  _id: string;
-  name: string;
-}
-
-interface FolderPermission {
-  _id: string;
-  teamId: string;
-  pathPrefix: string;
-  allowedRoles: string[];
-  allowedClerkIds: string[];
-  note?: string;
-  createdAt: number;
-  createdByClerkId: string;
-}
-
-const ROLE_OPTIONS = ["owner", "admin", "member", "viewer"] as const;
-
-function FolderAclsPanel({ client }: { client: ConvexClient | null }) {
-  const teams = useConvexQuery<TeamSummary[]>(client, "teams:list", {}) ?? [];
-  const [teamId, setTeamId] = useState<string>("");
-  // Auto-select the first team once the list comes in so the panel
-  // isn't blank for the common case of "I'm only on one team."
-  useEffect(() => {
-    if (!teamId && teams.length > 0) setTeamId(teams[0]._id);
-  }, [teams, teamId]);
-
-  const grants =
-    useConvexQuery<FolderPermission[]>(
-      client,
-      "folderPermissions:listForTeam",
-      teamId ? { teamId } : "skip",
-    ) ?? [];
-
-  const [draft, setDraft] = useState({
-    pathPrefix: "",
-    allowedRoles: ["owner", "admin", "member"] as string[],
-    allowedClerkIds: "",
-    note: "",
-  });
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  const add = async () => {
-    if (!client || !teamId) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      await callMutation(client, "folderPermissions:create", {
-        teamId,
-        pathPrefix: draft.pathPrefix,
-        allowedRoles: draft.allowedRoles,
-        allowedClerkIds: draft.allowedClerkIds
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean),
-        note: draft.note || undefined,
-      });
-      setDraft({ pathPrefix: "", allowedRoles: ["owner", "admin", "member"], allowedClerkIds: "", note: "" });
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const remove = async (id: string) => {
-    if (!client) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      await callMutation(client, "folderPermissions:remove", { permissionId: id });
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (!client) {
-    return (
-      <p style={{ fontSize: 11, color: "#888", margin: 0 }}>
-        Configure Convex URL + auth token above to manage ACLs.
-      </p>
-    );
-  }
-
-  return (
-    <div>
-      <Field label="Team">
-        <select
-          value={teamId}
-          onChange={(e) => setTeamId(e.target.value)}
-          style={{ width: "100%" }}
-        >
-          {teams.length === 0 ? <option value="">Loading teams…</option> : null}
-          {teams.map((t) => (
-            <option key={t._id} value={t._id}>
-              {t.name}
-            </option>
-          ))}
-        </select>
-      </Field>
-
-      {grants.length > 0 ? (
-        <table
-          style={{
-            width: "100%",
-            borderCollapse: "collapse",
-            fontSize: 11,
-            marginTop: 10,
-            border: "1px solid #ccc",
-          }}
-        >
-          <thead>
-            <tr style={{ background: "#1a1a1a", color: "#f0f0e8", textAlign: "left" }}>
-              <th style={{ padding: 6, fontWeight: 700 }}>Path prefix</th>
-              <th style={{ padding: 6, fontWeight: 700 }}>Roles</th>
-              <th style={{ padding: 6, fontWeight: 700 }}>Clerk IDs</th>
-              <th style={{ padding: 6, fontWeight: 700 }}>Note</th>
-              <th style={{ padding: 6 }}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {grants.map((g) => (
-              <tr key={g._id} style={{ borderTop: "1px solid #eee" }}>
-                <td style={{ padding: 6, fontFamily: "monospace" }}>{g.pathPrefix}</td>
-                <td style={{ padding: 6 }}>{g.allowedRoles.join(", ") || "—"}</td>
-                <td style={{ padding: 6, fontFamily: "monospace", maxWidth: 160, wordBreak: "break-all" }}>
-                  {g.allowedClerkIds.length > 0 ? g.allowedClerkIds.join(", ") : "—"}
-                </td>
-                <td style={{ padding: 6, color: "#666" }}>{g.note || ""}</td>
-                <td style={{ padding: 6, textAlign: "right" }}>
-                  <button
-                    className="ghost"
-                    onClick={() => void remove(g._id)}
-                    disabled={busy}
-                  >
-                    remove
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : teamId ? (
-        <p style={{ fontSize: 11, color: "#888", margin: "10px 0 0" }}>
-          No grants yet. With zero grants, every folder is accessible to all
-          team members. Add a grant to start gating folders.
-        </p>
-      ) : null}
-
-      <div style={{ marginTop: 14, padding: 10, border: "1px dashed #888" }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: "#1a1a1a", marginBottom: 6 }}>
-          ADD GRANT
-        </div>
-        <Field label="Path prefix">
-          <input
-            placeholder="projects/red-bull-spring/raw/"
-            value={draft.pathPrefix}
-            onChange={(e) => setDraft((d) => ({ ...d, pathPrefix: e.target.value }))}
-            style={{ width: "100%", fontFamily: "monospace", fontSize: 11 }}
-          />
-        </Field>
-        <Field label="Roles with access">
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            {ROLE_OPTIONS.map((role) => (
-              <label key={role} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11 }}>
-                <input
-                  type="checkbox"
-                  checked={draft.allowedRoles.includes(role)}
-                  onChange={(e) =>
-                    setDraft((d) => ({
-                      ...d,
-                      allowedRoles: e.target.checked
-                        ? [...d.allowedRoles, role]
-                        : d.allowedRoles.filter((r) => r !== role),
-                    }))
-                  }
-                />
-                {role}
-              </label>
-            ))}
-          </div>
-        </Field>
-        <Field label="Specific user Clerk IDs (comma-separated, optional)">
-          <input
-            placeholder="user_abc, user_xyz"
-            value={draft.allowedClerkIds}
-            onChange={(e) => setDraft((d) => ({ ...d, allowedClerkIds: e.target.value }))}
-            style={{ width: "100%", fontFamily: "monospace", fontSize: 11 }}
-          />
-        </Field>
-        <Field label="Note (optional)">
-          <input
-            placeholder="Raw masters — sound team only"
-            value={draft.note}
-            onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))}
-            style={{ width: "100%" }}
-          />
-        </Field>
-        {err ? (
-          <p style={{ fontSize: 11, color: "#7f1d1d", margin: "6px 0 0" }}>{err}</p>
-        ) : null}
-        <button
-          onClick={() => void add()}
-          disabled={busy || !teamId || !draft.pathPrefix.trim()}
-          style={{ marginTop: 8 }}
-        >
-          {busy ? "Saving…" : "Add grant"}
-        </button>
-      </div>
-    </div>
-  );
-}
