@@ -15,6 +15,18 @@ const SETTINGS_FILE = path.join(SETTINGS_DIR, "settings.json");
 
 // ---- Settings persistence ----------------------------------------------------
 
+// LucidLink-parity feature flags. Each entry gates a separate background
+// loop in the main process (presence polling, prefetch watcher, LAN cache
+// server, ACL enforcement). Defaults are all false so existing users
+// don't get surprise background work after an update — they have to opt
+// in from the Settings → Features panel.
+const DEFAULT_FEATURES = {
+  presence: { enabled: false },
+  prefetch: { enabled: false },
+  lanCache: { enabled: false, port: 17900 },
+  acls: { enabled: false },
+};
+
 const DEFAULT_SETTINGS = {
   convexUrl: "",
   convexAuthToken: "",
@@ -31,12 +43,20 @@ const DEFAULT_SETTINGS = {
   // whenever the user clicks "Mount" and false on explicit "Unmount" so the
   // app respects intent on next launch.
   autoMount: false,
+  features: DEFAULT_FEATURES,
 };
 
 async function loadSettings() {
   try {
     const raw = await fs.readFile(SETTINGS_FILE, "utf8");
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    const parsed = JSON.parse(raw);
+    // Deep-merge `features` so adding a new flag in DEFAULT_FEATURES
+    // doesn't get clobbered to undefined by an older settings file.
+    const features = { ...DEFAULT_FEATURES, ...(parsed.features || {}) };
+    for (const key of Object.keys(DEFAULT_FEATURES)) {
+      features[key] = { ...DEFAULT_FEATURES[key], ...(features[key] || {}) };
+    }
+    return { ...DEFAULT_SETTINGS, ...parsed, features };
   } catch {
     return { ...DEFAULT_SETTINGS };
   }

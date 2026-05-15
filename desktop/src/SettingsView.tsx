@@ -29,6 +29,18 @@ export function SettingsView({ settings, onChange, firstRun }: Props) {
   ) => {
     setDraft((d) => ({ ...d, storage: { ...d.storage, [key]: value } }));
   };
+  const setFeature = <K extends keyof DesktopSettings["features"]>(
+    key: K,
+    patch: Partial<DesktopSettings["features"][K]>,
+  ) => {
+    setDraft((d) => ({
+      ...d,
+      features: {
+        ...d.features,
+        [key]: { ...d.features[key], ...patch } as DesktopSettings["features"][K],
+      },
+    }));
+  };
 
   return (
     <div style={{ maxWidth: 720 }}>
@@ -146,6 +158,50 @@ export function SettingsView({ settings, onChange, firstRun }: Props) {
         </Field>
       </Section>
 
+      <Section title="Features (beta)">
+        <p style={{ fontSize: 12, color: "#1a1a1a", margin: "0 0 10px" }}>
+          LucidLink-parity work, each individually toggleable. All start
+          off until you flip them on; turning one off stops its background
+          loop on the next save.
+        </p>
+        <FeatureToggle
+          label="File presence + soft locks"
+          description="Surface 'Alex has seq_03.prproj open' across the team. Polls lsof on the mount path every few seconds."
+          enabled={draft.features.presence.enabled}
+          onChange={(enabled) => setFeature("presence", { enabled })}
+        />
+        <FeatureToggle
+          label="Predictive prefetch"
+          description="When a .prproj is opened, parse it and warm the rclone VFS cache for the referenced clips before the editor scrubs."
+          enabled={draft.features.prefetch.enabled}
+          onChange={(enabled) => setFeature("prefetch", { enabled })}
+        />
+        <FeatureToggle
+          label="LAN-shared cache"
+          description="Peers on the same network serve already-fetched clips directly over LAN. Discovers other snip instances via mDNS."
+          enabled={draft.features.lanCache.enabled}
+          onChange={(enabled) => setFeature("lanCache", { enabled })}
+          rightSlot={
+            <input
+              type="number"
+              min={1024}
+              max={65535}
+              value={draft.features.lanCache.port}
+              onChange={(e) => setFeature("lanCache", { port: Number(e.target.value) || 17900 })}
+              disabled={!draft.features.lanCache.enabled}
+              style={{ width: 80, fontFamily: "monospace", fontSize: 11 }}
+              title="Local HTTP cache server port"
+            />
+          }
+        />
+        <FeatureToggle
+          label="Folder ACLs"
+          description="Per-folder team permissions surface in the UI. Storage-level enforcement (scoped STS credentials) is separate work."
+          enabled={draft.features.acls.enabled}
+          onChange={(enabled) => setFeature("acls", { enabled })}
+        />
+      </Section>
+
       <Section title="Mount as drive (advanced)">
         <p style={{ fontSize: 12, color: "#1a1a1a", margin: "0 0 8px" }}>
           Mount the whole bucket so Finder / Premiere / Resolve see your
@@ -260,5 +316,45 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       </div>
       {children}
     </label>
+  );
+}
+
+function FeatureToggle({
+  label,
+  description,
+  enabled,
+  onChange,
+  rightSlot,
+}: {
+  label: string;
+  description: string;
+  enabled: boolean;
+  onChange: (enabled: boolean) => void;
+  rightSlot?: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 12,
+        alignItems: "flex-start",
+        padding: "8px 0",
+        borderTop: "1px solid #ccc",
+      }}
+    >
+      <input
+        type="checkbox"
+        checked={enabled}
+        onChange={(e) => onChange(e.target.checked)}
+        style={{ marginTop: 3, flexShrink: 0 }}
+      />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 700, fontSize: 13, color: "#1a1a1a" }}>{label}</div>
+        <div style={{ fontSize: 11, color: "#666", marginTop: 2, lineHeight: 1.4 }}>
+          {description}
+        </div>
+      </div>
+      {rightSlot ? <div style={{ flexShrink: 0 }}>{rightSlot}</div> : null}
+    </div>
   );
 }
