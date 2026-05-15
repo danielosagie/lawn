@@ -77,13 +77,14 @@ function FolderPermissionsRoute() {
   }
 
   const add = async () => {
-    if (!draft.pathPrefix.trim()) return;
+    const normalizedPrefix = draft.pathPrefix.trim();
+    if (!normalizedPrefix) return;
     setBusy(true);
     setErr(null);
     try {
       await create({
         teamId: team._id,
-        pathPrefix: draft.pathPrefix,
+        pathPrefix: normalizedPrefix,
         allowedRoles: draft.allowedRoles,
         allowedClerkIds: draft.allowedClerkIds,
         note: draft.note || undefined,

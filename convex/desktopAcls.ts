@@ -1,4 +1,3 @@
-import { v } from "convex/values";
 import { query } from "./_generated/server";
 
 /**
@@ -42,8 +41,15 @@ export const getEffectiveFilters = query({
       .collect();
 
     type Rule = { action: "+" | "-"; pattern: string };
-    const rules: Rule[] = [];
 
+    // Collapse per-pattern so identical prefixes from overlapping grants
+    // (e.g. one role-based + one explicit-user grant on the same path)
+    // resolve deterministically. Allow wins: if *any* matching grant
+    // for that pattern allows the user, the pattern is allowed.
+    // Multiple grants emitting both "+" and "-" for the same exact
+    // pattern would otherwise produce duplicate rules whose relative
+    // order rclone resolves by file position — flaky and surprising.
+    const patternAllowed = new Map<string, boolean>();
     for (const m of memberships) {
       const grants = await ctx.db
         .query("folderPermissions")
@@ -53,14 +59,19 @@ export const getEffectiveFilters = query({
         // Glob the prefix to match everything under it. rclone uses
         // shell-style patterns; `**` matches across directories.
         const pattern = `${g.pathPrefix}**`;
-        const roleAllowed = g.allowedRoles.includes(m.role);
-        const userAllowed = g.allowedClerkIds.includes(identity.subject);
-        rules.push({
-          action: roleAllowed || userAllowed ? "+" : "-",
+        const allowed =
+          g.allowedRoles.includes(m.role) ||
+          g.allowedClerkIds.includes(identity.subject);
+        patternAllowed.set(
           pattern,
-        });
+          (patternAllowed.get(pattern) ?? false) || allowed,
+        );
       }
     }
+
+    const rules: Rule[] = [...patternAllowed.entries()].map(
+      ([pattern, allowed]) => ({ action: allowed ? "+" : "-", pattern }),
+    );
 
     // Order: longest prefix first. rclone takes the first match, so
     // more-specific deny rules need to win over broader allow rules

@@ -41,7 +41,7 @@ export function SnipMark({ size = 24, className }: SnipMarkProps) {
     >
       <Film
         size={iconSize}
-        strokeWidth={2}
+        strokeWidth={2.5}
         color="#f0f0e8"
         absoluteStrokeWidth
       />

@@ -1215,6 +1215,7 @@ async function startMount({ mountPath } = {}) {
   // Finder/Premiere/Resolve all see a filtered view of the bucket.
   let filterFromArgs = [];
   if (settings.features?.acls?.enabled) {
+    const filterPath = path.join(SETTINGS_DIR, "rclone-filters.txt");
     try {
       const rules = await convexCall(
         "query",
@@ -1223,15 +1224,24 @@ async function startMount({ mountPath } = {}) {
       );
       if (Array.isArray(rules) && rules.length > 0) {
         const lines = rules.map((r) => `${r.action} ${r.pattern}`);
-        const filterPath = path.join(SETTINGS_DIR, "rclone-filters.txt");
         await fs.writeFile(filterPath, lines.join("\n") + "\n");
         filterFromArgs = ["--filter-from", filterPath];
         pushLog(`ACLs: applying ${rules.length} filter rule(s) from Convex`);
       } else {
-        pushLog(`ACLs enabled, but no grants matched — mount stays default-allow.`);
+        pushLog(`ACLs enabled, no grants matched — mount stays default-allow.`);
       }
     } catch (err) {
-      pushLog(`ACLs: filter fetch failed (${err.message}); proceeding without filters`);
+      // Fail-CLOSED. If the user enabled ACL enforcement and we can't
+      // fetch the rules (Convex down, token expired, network blip),
+      // the right behaviour is to hide everything until we recover —
+      // not silently mount full-access. We write a deny-all filter
+      // file and feed it to rclone; the FUSE mount comes up showing
+      // an empty bucket, and the log line tells the user why.
+      await fs.writeFile(filterPath, "- *\n");
+      filterFromArgs = ["--filter-from", filterPath];
+      pushLog(
+        `ACLs: filter fetch failed (${err.message}) — mounting deny-all to fail closed. Fix the Convex connection and re-mount.`,
+      );
     }
   }
 
