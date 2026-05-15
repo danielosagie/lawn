@@ -73,7 +73,7 @@
         "NSAppleEventsUsageDescription": "snip uses Apple Events to open mounted folders in Finder.",
         "NSSystemAdministrationUsageDescription": "snip mounts your cloud bucket as a local drive via FUSE."
       },
-      "notarize": false
+      "notarize": true
     },
     "dmg": {
       "title": "snip ${version}",
