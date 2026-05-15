@@ -1206,6 +1206,35 @@ async function startMount({ mountPath } = {}) {
   const cacheDir = path.join(SETTINGS_DIR, "rclone-cache");
   await fs.mkdir(cacheDir, { recursive: true });
 
+  // ── Optional: --filter-from from Convex-stored folder permissions ──
+  //
+  // When `features.acls.enabled` is on, fetch the user's effective
+  // rules from Convex (one + or - line per matching folderPermissions
+  // grant), write them to a file, and pass `--filter-from` to rclone.
+  // The FUSE layer then hides files the user isn't entitled to —
+  // Finder/Premiere/Resolve all see a filtered view of the bucket.
+  let filterFromArgs = [];
+  if (settings.features?.acls?.enabled) {
+    try {
+      const rules = await convexCall(
+        "query",
+        "desktopAcls:getEffectiveFilters",
+        {},
+      );
+      if (Array.isArray(rules) && rules.length > 0) {
+        const lines = rules.map((r) => `${r.action} ${r.pattern}`);
+        const filterPath = path.join(SETTINGS_DIR, "rclone-filters.txt");
+        await fs.writeFile(filterPath, lines.join("\n") + "\n");
+        filterFromArgs = ["--filter-from", filterPath];
+        pushLog(`ACLs: applying ${rules.length} filter rule(s) from Convex`);
+      } else {
+        pushLog(`ACLs enabled, but no grants matched — mount stays default-allow.`);
+      }
+    } catch (err) {
+      pushLog(`ACLs: filter fetch failed (${err.message}); proceeding without filters`);
+    }
+  }
+
   // VFS tuned for LucidLink-style streaming on NLE workloads:
   //  • vfs-cache-mode full   — cache read blocks on disk so revisits are local
   //  • multi-thread-streams  — parallel range reads on big files (the single
@@ -1222,6 +1251,9 @@ async function startMount({ mountPath } = {}) {
     "mount",
     mountTarget,
     targetPath,
+    // ACL filter rules (when enabled). The flag is appended once via
+    // spread to keep an empty list out of argv when ACLs are off.
+    ...filterFromArgs,
     // Cache strategy
     "--cache-dir", cacheDir,
     "--vfs-cache-mode", "full",

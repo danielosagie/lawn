@@ -19,6 +19,7 @@ import type * as contractTemplates from "../contractTemplates.js";
 import type * as contractVersions from "../contractVersions.js";
 import type * as contracts from "../contracts.js";
 import type * as demoSeed from "../demoSeed.js";
+import type * as desktopAcls from "../desktopAcls.js";
 import type * as desktopPresence from "../desktopPresence.js";
 import type * as featureFlags from "../featureFlags.js";
 import type * as folderPermissions from "../folderPermissions.js";
@@ -67,6 +68,7 @@ declare const fullApi: ApiFromModules<{
   contractVersions: typeof contractVersions;
   contracts: typeof contracts;
   demoSeed: typeof demoSeed;
+  desktopAcls: typeof desktopAcls;
   desktopPresence: typeof desktopPresence;
   featureFlags: typeof featureFlags;
   folderPermissions: typeof folderPermissions;
