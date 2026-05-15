@@ -70,17 +70,29 @@ jobs:
         working-directory: desktop
         run: bun run build:renderer
 
+      - name: Configure code signing
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID_SECRET: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD_SECRET: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID_SECRET: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [[ -n "$MACOS_CERTIFICATE" ]]; then
+            {
+              echo "CSC_LINK=$MACOS_CERTIFICATE"
+              echo "CSC_KEY_PASSWORD=$MACOS_CERTIFICATE_PASSWORD"
+              echo "APPLE_ID=$APPLE_ID_SECRET"
+              echo "APPLE_APP_SPECIFIC_PASSWORD=$APPLE_APP_SPECIFIC_PASSWORD_SECRET"
+              echo "APPLE_TEAM_ID=$APPLE_TEAM_ID_SECRET"
+            } >> "$GITHUB_ENV"
+          else
+            echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+            echo "No MACOS_CERTIFICATE secret set — building unsigned DMG."
+          fi
+
       - name: Build DMG (${{ matrix.arch }})
         working-directory: desktop
-        env:
-          # Code signing — leave unset to produce an unsigned DMG. The
-          # workflow exits 0 either way; the next step uploads whatever
-          # was produced.
-          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}
-          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: bunx electron-builder --mac dmg --${{ matrix.arch }}
 
       - name: Upload DMG artifact
