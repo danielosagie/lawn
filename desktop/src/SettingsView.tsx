@@ -192,7 +192,7 @@ export function SettingsView({ settings, onChange, firstRun }: Props) {
         />
         <FeatureToggle
           label="LAN peer cache"
-          description="Discover other snip Desktop instances on this network via mDNS and pull project files between machines over LAN (saves S3 egress for already-downloaded files). See the LAN Peers panel in the Mount tab once enabled."
+          description="Transparent peer-first reads — when a teammate on your network has already cached a clip, your editor reads it from them over LAN instead of S3. snip Desktop layers a rclone union remote at mount time with discovered peers as upstreams; the rclone serve subprocess exposes your VFS cache directory to them. Browse + manual pull also available from the LAN Peers panel in the Mount tab."
           enabled={draft.features.lanCache.enabled}
           onChange={(enabled) => setFeature("lanCache", { enabled })}
           rightSlot={
