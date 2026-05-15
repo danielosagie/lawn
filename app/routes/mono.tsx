@@ -1,6 +1,7 @@
 
 import { useState, useEffect } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
+import { SnipMark } from "@/components/SnipMark";
 
 export const Route = createFileRoute("/mono")({
   component: HomepageMono,
@@ -22,7 +23,10 @@ export default function HomepageMono() {
       {/* Minimal nav */}
       <nav className="sticky top-0 z-50 px-6 py-4 flex justify-between items-center bg-[#f0f0e8]">
         <div className="flex items-center gap-4">
-          <span className={`text-xl font-black transition-opacity duration-200 ${scrolled ? 'opacity-100' : 'opacity-0'}`}>snip</span>
+          <div className={`flex items-center gap-2 transition-opacity duration-200 ${scrolled ? 'opacity-100' : 'opacity-0'}`}>
+            <SnipMark size={22} />
+            <span className="text-xl font-black">snip</span>
+          </div>
           <span className={`text-xs text-[#888] hidden sm:inline border-l border-[#ccc] pl-4 transition-opacity duration-200 ${scrolled ? 'opacity-100' : 'opacity-0'}`}>video review</span>
         </div>
         <div className="flex gap-4 text-sm">
@@ -188,7 +192,10 @@ export default function HomepageMono() {
       {/* Footer */}
       <footer className="border-t-2 border-[#1a1a1a] px-6 py-8">
         <div className="max-w-5xl mx-auto flex justify-between items-center text-sm">
-          <span className="font-black text-xl">snip</span>
+          <div className="flex items-center gap-2">
+            <SnipMark size={20} />
+            <span className="font-black text-xl">snip</span>
+          </div>
           <div className="flex gap-6 text-[#888]">
             <a href="/github" className="hover:text-[#1a1a1a]">GitHub</a>
           </div>

@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { SnipMark } from "@/components/SnipMark";
 
 export function AuthShell({ children }: { children: ReactNode }) {
   return (
@@ -18,7 +19,8 @@ export function AuthShell({ children }: { children: ReactNode }) {
 
       <div className="relative z-10 w-full max-w-md px-4">
         <div className="text-center mb-8">
-          <Link to="/" className="inline-block">
+          <Link to="/" className="inline-flex items-center gap-3">
+            <SnipMark size={36} />
             <span className="text-4xl font-black text-[#1a1a1a]">snip</span>
           </Link>
           <p className="mt-3 text-sm text-[#888]">

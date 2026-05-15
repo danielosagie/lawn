@@ -603,6 +603,73 @@ export default defineSchema({
     .index("by_team", ["teamId"])
     .index("by_team_and_deleted_at", ["teamId", "deletedAt"]),
 
+  /**
+   * Per-folder team permission grants. Each row scopes a path prefix
+   * (e.g. "projects/red-bull-spring/raw/") to a set of roles and/or
+   * specific user clerk IDs. The snip Desktop app's ACL panel uses
+   * `folderPermissions:checkAccess` to gate visibility of folders in
+   * the team-shared mount.
+   *
+   * This table records *intent*. Actual S3-side enforcement (scoped
+   * STS credentials vended per session) is a separate infrastructure
+   * concern that isn't wired up yet — the data layer is the
+   * prerequisite for that future work, and the UI surfaces the
+   * intended grants to the team admin.
+   */
+  folderPermissions: defineTable({
+    teamId: v.id("teams"),
+    // Path prefix within the team's bucket / project tree. Matched as
+    // a string prefix in checkAccess, with a trailing-separator guard
+    // to avoid sibling-folder leakage.
+    pathPrefix: v.string(),
+    // Roles that get automatic access. Empty array means role-based
+    // access is disabled and the grant relies on allowedClerkIds.
+    allowedRoles: v.array(v.string()),
+    // Explicit user grants (Clerk subject IDs). Layers on top of
+    // allowedRoles — either a role match OR a clerkId match grants
+    // access.
+    allowedClerkIds: v.array(v.string()),
+    // Human note shown in the admin UI ("Raw masters — sound team only").
+    note: v.optional(v.string()),
+    createdAt: v.number(),
+    createdByClerkId: v.string(),
+  })
+    .index("by_team", ["teamId"])
+    .index("by_team_and_prefix", ["teamId", "pathPrefix"]),
+
+  /**
+   * Live "who has what file open" state from the snip Desktop app.
+   * The desktop main process polls `lsof` against the mount path every
+   * few seconds and upserts the row for its `clientId` (a stable
+   * per-install ID). Rows older than ~30s are stale and the read query
+   * filters them out; we don't TTL because Convex doesn't have native
+   * TTL — stale rows are overwritten on the next push, or cleared on
+   * graceful shutdown via `desktopPresence:clearLocks`.
+   */
+  desktopFileLocks: defineTable({
+    clientId: v.string(),
+    userClerkId: v.string(),
+    userName: v.optional(v.string()),
+    // Project the mount is rooted under. Optional because the desktop
+    // app can run before the user picks an active project.
+    projectId: v.optional(v.id("projects")),
+    teamId: v.optional(v.id("teams")),
+    mountPath: v.string(),
+    files: v.array(
+      v.object({
+        // Path relative to mountPath.
+        path: v.string(),
+        // The process that has the file open, e.g. "Adobe Premiere Pro 2024".
+        process: v.optional(v.string()),
+        pid: v.optional(v.number()),
+      }),
+    ),
+    lastSeen: v.number(),
+  })
+    .index("by_client", ["clientId"])
+    .index("by_project", ["projectId"])
+    .index("by_team", ["teamId"]),
+
   projectVersions: defineTable({
     projectId: v.id("projects"),
     teamId: v.id("teams"),

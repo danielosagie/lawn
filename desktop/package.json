@@ -21,6 +21,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.991.0",
     "@aws-sdk/lib-storage": "^3.991.0",
+    "bonjour-service": "^1.3.0",
     "convex": "^1.31.7",
     "fast-xml-parser": "^5.8.0",
     "react": "19.2.3",
@@ -73,7 +74,7 @@
         "NSAppleEventsUsageDescription": "snip uses Apple Events to open mounted folders in Finder.",
         "NSSystemAdministrationUsageDescription": "snip mounts your cloud bucket as a local drive via FUSE."
       },
-      "notarize": false
+      "notarize": true
     },
     "dmg": {
       "title": "snip ${version}",
@@ -83,8 +84,17 @@
         "height": 380
       },
       "contents": [
-        { "x": 140, "y": 200, "type": "file" },
-        { "x": 400, "y": 200, "type": "link", "path": "/Applications" }
+        {
+          "x": 140,
+          "y": 200,
+          "type": "file"
+        },
+        {
+          "x": 400,
+          "y": 200,
+          "type": "link",
+          "path": "/Applications"
+        }
       ]
     },
     "directories": {

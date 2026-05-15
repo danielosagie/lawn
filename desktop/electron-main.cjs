@@ -5,7 +5,9 @@ const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs/promises");
 const fssync = require("node:fs");
-const { spawn, execSync } = require("node:child_process");
+const { spawn, execSync, execFile } = require("node:child_process");
+const crypto = require("node:crypto");
+const zlib = require("node:zlib");
 
 const DEV_URL = "http://localhost:5300";
 const PROD_INDEX = path.join(__dirname, "dist/index.html");
@@ -14,6 +16,18 @@ const SETTINGS_DIR = path.join(app.getPath("userData"));
 const SETTINGS_FILE = path.join(SETTINGS_DIR, "settings.json");
 
 // ---- Settings persistence ----------------------------------------------------
+
+// LucidLink-parity feature flags. Each entry gates a separate background
+// loop in the main process (presence polling, prefetch watcher, LAN cache
+// server, ACL enforcement). Defaults are all false so existing users
+// don't get surprise background work after an update — they have to opt
+// in from the Settings → Features panel.
+const DEFAULT_FEATURES = {
+  presence: { enabled: false },
+  prefetch: { enabled: false },
+  lanCache: { enabled: false, port: 17900 },
+  acls: { enabled: false },
+};
 
 const DEFAULT_SETTINGS = {
   convexUrl: "",
@@ -31,12 +45,20 @@ const DEFAULT_SETTINGS = {
   // whenever the user clicks "Mount" and false on explicit "Unmount" so the
   // app respects intent on next launch.
   autoMount: false,
+  features: DEFAULT_FEATURES,
 };
 
 async function loadSettings() {
   try {
     const raw = await fs.readFile(SETTINGS_FILE, "utf8");
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    const parsed = JSON.parse(raw);
+    // Deep-merge `features` so adding a new flag in DEFAULT_FEATURES
+    // doesn't get clobbered to undefined by an older settings file.
+    const features = { ...DEFAULT_FEATURES, ...(parsed.features || {}) };
+    for (const key of Object.keys(DEFAULT_FEATURES)) {
+      features[key] = { ...DEFAULT_FEATURES[key], ...(features[key] || {}) };
+    }
+    return { ...DEFAULT_SETTINGS, ...parsed, features };
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
@@ -142,8 +164,716 @@ function reportProgress(payload) {
 ipcMain.handle("settings:get", async () => loadSettings());
 ipcMain.handle("settings:set", async (_event, next) => {
   await saveSettings(next);
+  // Re-evaluate background loops against the new flags.
+  await reconcileFeatures().catch((err) => {
+    console.error("reconcileFeatures failed after settings:set:", err);
+  });
   return next;
 });
+
+// ---- Convex HTTP helper (for background loops in this file) ------------------
+//
+// The existing call-sites in this file inline the fetch + bearer-token dance;
+// pulling it out so the presence + prefetch loops can hit Convex with one
+// line. Errors are logged but don't throw — these loops are best-effort and
+// must never crash the app on transient Convex outages.
+
+async function convexCall(kind, fnPath, args) {
+  const settings = await loadSettings();
+  if (!settings.convexUrl || !settings.convexAuthToken) {
+    throw new Error("Convex URL + auth token not configured.");
+  }
+  const url = `${settings.convexUrl.replace(/\/$/, "")}/api/${kind}`;
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${settings.convexAuthToken}`,
+    },
+    body: JSON.stringify({ path: fnPath, args, format: "json" }),
+  });
+  if (!resp.ok) {
+    throw new Error(`Convex ${kind} ${fnPath} → HTTP ${resp.status}: ${await resp.text()}`);
+  }
+  const body = await resp.json();
+  if (body.status === "error") {
+    throw new Error(`Convex ${fnPath}: ${body.errorMessage || "unknown error"}`);
+  }
+  return body.value;
+}
+
+// ---- Feature loop: file presence + soft locks --------------------------------
+//
+// Polls `lsof` against the active mount path every 5s, posts the list of
+// open files + the process that has them to Convex via
+// `desktopPresence:upsertLocks`. Other team members read those rows via
+// `desktopPresence:listForProject` to render "Alex has X open" badges.
+//
+// The lsof invocation:
+//   lsof -Fpcn +D <mountPath>
+// emits one stanza per open fd:
+//   p<pid>
+//   c<command>
+//   n<path>
+// We filter to files under the mount and dedupe by (pid, path) — most
+// editors hold the same file open from many fds.
+
+const CLIENT_ID_FILE = path.join(SETTINGS_DIR, "client-id");
+
+function getClientId() {
+  try {
+    return fssync.readFileSync(CLIENT_ID_FILE, "utf8").trim();
+  } catch {
+    const id = crypto.randomBytes(8).toString("hex");
+    try {
+      fssync.mkdirSync(SETTINGS_DIR, { recursive: true });
+      fssync.writeFileSync(CLIENT_ID_FILE, id);
+    } catch {
+      // Non-fatal: presence will use an ephemeral ID for this session.
+    }
+    return id;
+  }
+}
+
+const presenceState = {
+  intervalId: null,
+  inFlight: false,
+};
+
+function parseLsof(stdout, mountPath) {
+  // Editors open the same file on many fds; the (pid, path) dedupe keeps
+  // the payload small and predictable for the Convex row size limit.
+  const seen = new Set();
+  const out = [];
+  let cur = {};
+  // Path boundary: a sibling mount at `/mnt/proj2` must NOT match a
+  // mountPath of `/mnt/proj`, even though `startsWith` says yes. Append
+  // the platform separator so the prefix is forced to be at a path
+  // boundary. Match on the bare mountPath too (lsof can report the mount
+  // root itself when an app has a handle on the directory).
+  const mountRootWithSep = mountPath.endsWith(path.sep) ? mountPath : `${mountPath}${path.sep}`;
+  const flush = () => {
+    if (cur.path && (cur.path === mountPath || cur.path.startsWith(mountRootWithSep))) {
+      const key = `${cur.pid}::${cur.path}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push({
+          path: cur.path.slice(mountPath.length).replace(/^[/\\]/, ""),
+          process: cur.process,
+          pid: cur.pid,
+        });
+      }
+    }
+    cur = {};
+  };
+  for (const line of stdout.split("\n")) {
+    if (!line) continue;
+    const type = line[0];
+    const value = line.slice(1);
+    if (type === "p") {
+      flush();
+      cur.pid = Number(value) || undefined;
+    } else if (type === "c") {
+      cur.process = value;
+    } else if (type === "n") {
+      cur.path = value;
+    }
+  }
+  flush();
+  return out;
+}
+
+function listOpenFilesUnderMount(mountPath) {
+  return new Promise((resolve) => {
+    if (!mountPath) return resolve([]);
+    // -F p,c,n: machine-readable fields. +D recurses into the directory.
+    // Timeout 4s so a stuck lsof can't pin the loop forever.
+    execFile(
+      "lsof",
+      ["-Fpcn", "+D", mountPath],
+      { timeout: 4000, maxBuffer: 4 * 1024 * 1024 },
+      (err, stdout) => {
+        // lsof exits 1 when nothing is open under the path; treat as success.
+        if (err && err.code !== 1) return resolve([]);
+        resolve(parseLsof(stdout || "", mountPath));
+      },
+    );
+  });
+}
+
+async function pushPresenceOnce() {
+  if (presenceState.inFlight) return;
+  presenceState.inFlight = true;
+  try {
+    const settings = await loadSettings();
+    if (!settings.features?.presence?.enabled) return;
+    if (!settings.convexUrl || !settings.convexAuthToken) return;
+    if (mountState.status !== "mounted" || !mountState.mountPath) return;
+
+    const files = await listOpenFilesUnderMount(mountState.mountPath);
+    await convexCall("mutation", "desktopPresence:upsertLocks", {
+      clientId: getClientId(),
+      projectId: settings.activeProjectId || undefined,
+      mountPath: mountState.mountPath,
+      files,
+    });
+  } catch (err) {
+    // Best-effort; surface to the mount log so users can debug if a
+    // misconfigured Convex token or expired session causes silence.
+    pushLog?.(`presence: ${err.message}`);
+  } finally {
+    presenceState.inFlight = false;
+  }
+}
+
+function startPresenceLoop() {
+  if (presenceState.intervalId) return;
+  // Immediate first push so a freshly-opened editor shows up without a
+  // 5s wait, then steady-state cadence.
+  void pushPresenceOnce();
+  presenceState.intervalId = setInterval(pushPresenceOnce, 5000);
+}
+
+function stopPresenceLoop() {
+  if (!presenceState.intervalId) return;
+  clearInterval(presenceState.intervalId);
+  presenceState.intervalId = null;
+  // Clear our row on stop so other users don't keep seeing a stale
+  // "open files" set for the next ~30s.
+  void convexCall("mutation", "desktopPresence:clearLocks", {
+    clientId: getClientId(),
+  }).catch(() => {});
+}
+
+// ---- Feature loop: predictive prefetch ---------------------------------------
+//
+// Premiere editors hit the play button and expect their clips to scrub
+// immediately. With a cloud-backed mount that means rclone's VFS cache
+// has to already hold the first chunk of every clip in the bin. We get
+// most of the way there by watching for `.prproj` writes (Premiere
+// rewrites the project on every save / autosave) and warming the cache
+// for every absolute mount-path string we find in the decompressed
+// project XML.
+//
+// Scope notes for v0:
+// - Only Premiere `.prproj`. DaVinci Resolve `.drp` is sqlite; FCP
+//   `.fcpxmld` is a bundle. Both are 2× the work each and will land
+//   in follow-up commits if this approach pans out.
+// - We don't parse the XML structure — we scan the decompressed bytes
+//   for substrings that start with the mount path. Misses
+//   ${PROJ_LOCATION}-style placeholders but catches the common case of
+//   absolute paths that the editor resolved before saving.
+// - Warmer is `cat <path> >/dev/null` with concurrency 4. Each call
+//   pulls the file through rclone's VFS cache; cache size is bounded
+//   by the user's rclone --vfs-cache-max-size flag.
+// - lastWarmed dedupes per-path with a 60s window so re-saving a
+//   project every few seconds during an editing burst doesn't kick
+//   off a thundering herd against the bucket.
+
+// zlib + fast-xml-parser are required further down in this file for the
+// Resolve / Premiere snapshot flows. We reuse those imports here rather
+// than re-declaring them; the prefetch implementation only needs gunzip
+// and substring scanning — no structured XML walk yet.
+
+const prefetchState = {
+  watcher: null,
+  // path → epoch-ms of the last successful warm. Cap at 5 minutes so a
+  // long-running session doesn't grow this map without bound.
+  lastWarmed: new Map(),
+  inFlight: new Set(),
+  queue: [],
+  workers: 0,
+};
+
+const PREFETCH_WARM_COOLDOWN_MS = 60_000;
+const PREFETCH_MAX_CONCURRENCY = 4;
+const PREFETCH_MAX_PATHS_PER_PROJ = 2000;
+
+function decompressIfGzip(buf) {
+  // Premiere .prproj starts with the gzip magic bytes 1f 8b.
+  if (buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
+    return zlib.gunzipSync(buf);
+  }
+  return buf;
+}
+
+function extractMountPathsFromProject(text, mountPath) {
+  // Scan for substrings that start with the mount root and look like
+  // file paths. The regex bound is `[^<>"'\s]+` which covers paths
+  // embedded in XML attributes ("path=...") and CDATA blocks. We accept
+  // either '/' or '\\' as the separator after the mount root so a
+  // .prproj that was authored on Windows and synced to a Mac mount via
+  // cloud-side rclone-style sharing still matches; downstream warming
+  // normalizes by passing the path straight to createReadStream which
+  // accepts both separators on POSIX hosts too.
+  const escaped = mountPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`${escaped}[\\\\/][^<>"'\\s]+`, "g");
+  const out = new Set();
+  let match;
+  let count = 0;
+  while ((match = re.exec(text)) !== null) {
+    out.add(match[0]);
+    if (++count > PREFETCH_MAX_PATHS_PER_PROJ) break;
+  }
+  return [...out];
+}
+
+function warmPathOnce(absPath) {
+  return new Promise((resolve) => {
+    // `cat path >/dev/null` is the standard way to pull a file through
+    // rclone's VFS cache. We open + drain via streams to keep memory
+    // flat regardless of file size; the OS-level read is what populates
+    // the cache, not our buffer in JS.
+    const stream = fssync.createReadStream(absPath, { highWaterMark: 1 << 20 });
+    stream.on("data", () => {}); // drain
+    stream.on("end", () => resolve(true));
+    stream.on("error", () => resolve(false));
+  });
+}
+
+async function prefetchWorker() {
+  while (prefetchState.queue.length) {
+    const next = prefetchState.queue.shift();
+    if (prefetchState.inFlight.has(next)) continue;
+    prefetchState.inFlight.add(next);
+    try {
+      const ok = await warmPathOnce(next);
+      if (ok) prefetchState.lastWarmed.set(next, Date.now());
+    } finally {
+      prefetchState.inFlight.delete(next);
+    }
+  }
+  prefetchState.workers--;
+}
+
+function enqueuePrefetch(paths) {
+  const now = Date.now();
+  for (const p of paths) {
+    const last = prefetchState.lastWarmed.get(p);
+    if (last && now - last < PREFETCH_WARM_COOLDOWN_MS) continue;
+    if (prefetchState.inFlight.has(p)) continue;
+    prefetchState.queue.push(p);
+  }
+  while (prefetchState.workers < PREFETCH_MAX_CONCURRENCY && prefetchState.queue.length) {
+    prefetchState.workers++;
+    void prefetchWorker();
+  }
+}
+
+async function handlePrprojWrite(absPath, mountPath) {
+  try {
+    // Tiny debounce: Premiere autosave writes the file in two passes
+    // (temp file → rename). Wait 250ms so we read the final version.
+    await new Promise((r) => setTimeout(r, 250));
+    const raw = await fs.readFile(absPath);
+    const xml = decompressIfGzip(raw).toString("utf8");
+    const paths = extractMountPathsFromProject(xml, mountPath);
+    pushLog?.(`prefetch: ${path.basename(absPath)} → warming ${paths.length} media file(s)`);
+    enqueuePrefetch(paths);
+    // Cap the lastWarmed map. Iteration order is insertion order, so
+    // the oldest entries fall off first.
+    if (prefetchState.lastWarmed.size > 5000) {
+      const overflow = prefetchState.lastWarmed.size - 5000;
+      const it = prefetchState.lastWarmed.keys();
+      for (let i = 0; i < overflow; i++) prefetchState.lastWarmed.delete(it.next().value);
+    }
+  } catch (err) {
+    pushLog?.(`prefetch: parse failed for ${absPath} — ${err.message}`);
+  }
+}
+
+function startPrefetchWatcher() {
+  if (prefetchState.watcher) return;
+  if (mountState.status !== "mounted" || !mountState.mountPath) return;
+
+  const mountPath = mountState.mountPath;
+  try {
+    // macOS + Windows support recursive natively; on Linux fs.watch
+    // recursive landed in Node 20.
+    prefetchState.watcher = fssync.watch(
+      mountPath,
+      { recursive: true, persistent: false },
+      (eventType, filename) => {
+        // Premiere autosaves often land as a temp-file → rename swap so
+        // the editor never sees a half-written project. fs.watch emits
+        // those as "rename" events on the final name, not "change".
+        // Accept both so we don't miss real saves.
+        if ((eventType !== "change" && eventType !== "rename") || !filename) return;
+        if (!filename.endsWith(".prproj")) return;
+        const abs = path.join(mountPath, filename);
+        void handlePrprojWrite(abs, mountPath);
+      },
+    );
+    pushLog?.(`prefetch: watching ${mountPath} for .prproj writes`);
+  } catch (err) {
+    pushLog?.(`prefetch: watcher failed to attach — ${err.message}`);
+  }
+}
+
+function stopPrefetchWatcher() {
+  if (!prefetchState.watcher) return;
+  try {
+    prefetchState.watcher.close();
+  } catch {
+    // ignore
+  }
+  prefetchState.watcher = null;
+  prefetchState.queue.length = 0;
+  // Leave lastWarmed alone — if the feature is re-enabled in the same
+  // session, the dedupe window is still useful.
+}
+
+// ---- Feature loop: LAN-shared cache ------------------------------------------
+//
+// Discover other snip Desktop instances on the same LAN via mDNS and expose
+// our mount tree over HTTP so teammates can pull project files directly
+// between machines instead of re-downloading them from S3/R2.
+//
+// What this v0 *actually does*:
+// - mDNS publish + browse (`_snip-cache._tcp.local`) so peers see each
+//   other within ~5s of startup. TXT record carries our clientId +
+//   mountPath so peers can correlate.
+// - HTTP server on the user-configured port serving /health (peer
+//   liveness ping), /list?dir=relative/path (JSON directory listing),
+//   and /file?path=relative/path (streamed file with directory-
+//   traversal guards).
+// - Peer-to-peer pull: renderer can call `lanCache:pull` to download a
+//   file from a specific peer into the user's Downloads folder. Uses
+//   LAN bandwidth instead of S3 egress; for a team that's already
+//   warmed a project, second/third editors don't re-pay for the
+//   bytes.
+//
+// What it does NOT do (so it's clear in the UI description):
+// - Transparent acceleration of rclone reads. rclone owns its VFS cache;
+//   getting reads through the mount to consult peers first requires
+//   a custom rclone backend or a FUSE shim — that's separate work.
+
+const http = require("node:http");
+const url = require("node:url");
+
+const lanCacheState = {
+  server: null,
+  bonjour: null,
+  service: null,
+  browser: null,
+  // clientId → { host, port, mountPath, lastSeen, name }
+  peers: new Map(),
+  peerSweepInterval: null,
+};
+
+function getLocalLanAddress() {
+  // Pick the first non-internal IPv4 address. Good enough for the
+  // typical single-NIC studio workstation; the bonjour client will
+  // advertise on all interfaces anyway.
+  const os = require("node:os");
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name] || []) {
+      if (iface.family === "IPv4" && !iface.internal) return iface.address;
+    }
+  }
+  return "127.0.0.1";
+}
+
+function emitPeersUpdate() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("lanCache:peers", listLanCachePeers());
+  }
+}
+
+function listLanCachePeers() {
+  // Drop peers we haven't seen in 30s (mDNS announce TTL + slack).
+  const cutoff = Date.now() - 30_000;
+  return [...lanCacheState.peers.values()].filter((p) => p.lastSeen > cutoff);
+}
+
+function safeJoinMountRelative(mountPath, rel) {
+  // Resolve the requested path against the mount root and assert the
+  // result is still inside the mount. Blocks ".." escapes and absolute
+  // injection.
+  const cleaned = (rel || "").replace(/^[/\\]+/, "");
+  const abs = path.resolve(mountPath, cleaned);
+  const rootWithSep = mountPath.endsWith(path.sep) ? mountPath : `${mountPath}${path.sep}`;
+  if (abs !== mountPath && !abs.startsWith(rootWithSep)) {
+    return null;
+  }
+  return abs;
+}
+
+function handleLanCacheRequest(req, res, mountPath, clientId) {
+  // CORS: allow any origin (these are peers on a trusted LAN; the user
+  // opted in via Settings). We don't accept arbitrary methods so this
+  // surface stays tight.
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("X-Snip-Client", clientId);
+
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    res.writeHead(405);
+    return res.end("Method not allowed");
+  }
+
+  const parsed = url.parse(req.url, true);
+  const route = parsed.pathname;
+
+  if (route === "/health") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ ok: true, clientId, mountPath }));
+  }
+
+  if (route === "/list") {
+    const rel = String(parsed.query.dir || "");
+    const abs = safeJoinMountRelative(mountPath, rel);
+    if (!abs) {
+      res.writeHead(400);
+      return res.end("Bad path");
+    }
+    fssync.readdir(abs, { withFileTypes: true }, (err, entries) => {
+      if (err) {
+        res.writeHead(404);
+        return res.end("Not found");
+      }
+      // Cap the listing so a peer can't DoS us by listing a 200k-file dir.
+      const capped = entries.slice(0, 500).map((d) => ({
+        name: d.name,
+        isDirectory: d.isDirectory(),
+      }));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ dir: rel, entries: capped, truncated: entries.length > 500 }));
+    });
+    return;
+  }
+
+  if (route === "/file") {
+    const rel = String(parsed.query.path || "");
+    const abs = safeJoinMountRelative(mountPath, rel);
+    if (!abs) {
+      res.writeHead(400);
+      return res.end("Bad path");
+    }
+    fssync.stat(abs, (err, stat) => {
+      if (err || !stat.isFile()) {
+        res.writeHead(404);
+        return res.end("Not found");
+      }
+      res.writeHead(200, {
+        "Content-Type": "application/octet-stream",
+        "Content-Length": stat.size,
+        "Content-Disposition": `attachment; filename="${path.basename(abs)}"`,
+      });
+      if (req.method === "HEAD") return res.end();
+      fssync.createReadStream(abs).pipe(res);
+    });
+    return;
+  }
+
+  res.writeHead(404);
+  res.end("Not found");
+}
+
+function startLanCacheServer() {
+  if (lanCacheState.server) return;
+  const mountPath = mountState.mountPath;
+  if (!mountPath || mountState.status !== "mounted") return;
+
+  // Read fresh settings inline so the user can change the port + toggle
+  // and have it take effect without the loop restarting.
+  return loadSettings().then(async (settings) => {
+    const port = settings.features?.lanCache?.port || 17900;
+    const clientId = getClientId();
+
+    const server = http.createServer((req, res) =>
+      handleLanCacheRequest(req, res, mountPath, clientId),
+    );
+
+    await new Promise((resolve, reject) => {
+      const onError = (err) => {
+        pushLog?.(`lanCache: server bind failed on port ${port} — ${err.message}`);
+        reject(err);
+      };
+      server.once("error", onError);
+      server.listen(port, () => {
+        server.off("error", onError);
+        pushLog?.(`lanCache: serving ${mountPath} on port ${port}`);
+        resolve();
+      });
+    }).catch(() => {
+      // Bind failure (port in use, perms) — leave the feature inactive
+      // until the user picks a different port and re-saves.
+      return null;
+    });
+
+    if (server.listening) {
+      lanCacheState.server = server;
+      // Start mDNS only AFTER the HTTP server is bound, so peers that
+      // discover us can actually connect on the advertised port.
+      startMdnsService(port, clientId, mountPath);
+    }
+  });
+}
+
+function stopLanCacheServer() {
+  if (lanCacheState.server) {
+    try {
+      lanCacheState.server.close();
+    } catch {
+      // ignore
+    }
+    lanCacheState.server = null;
+  }
+  stopMdnsService();
+}
+
+function startMdnsService(port, clientId, mountPath) {
+  if (lanCacheState.bonjour) return;
+  let Bonjour;
+  try {
+    ({ Bonjour } = require("bonjour-service"));
+  } catch (err) {
+    pushLog?.(`lanCache: bonjour-service unavailable — ${err.message}`);
+    return;
+  }
+  lanCacheState.bonjour = new Bonjour();
+
+  // Publish.
+  lanCacheState.service = lanCacheState.bonjour.publish({
+    name: `snip-cache-${clientId.slice(0, 8)}`,
+    type: "snip-cache",
+    protocol: "tcp",
+    port,
+    txt: {
+      clientId,
+      mountPath,
+      version: "0",
+    },
+  });
+
+  // Browse.
+  lanCacheState.browser = lanCacheState.bonjour.find(
+    { type: "snip-cache", protocol: "tcp" },
+    (svc) => {
+      if (!svc || !svc.txt) return;
+      const peerClientId = svc.txt.clientId;
+      // Don't list ourselves.
+      if (!peerClientId || peerClientId === clientId) return;
+      const host = (svc.referer && svc.referer.address) || svc.host;
+      lanCacheState.peers.set(peerClientId, {
+        clientId: peerClientId,
+        name: svc.name,
+        host,
+        port: svc.port,
+        mountPath: svc.txt.mountPath || "",
+        lastSeen: Date.now(),
+      });
+      emitPeersUpdate();
+    },
+  );
+
+  if (!lanCacheState.peerSweepInterval) {
+    // Drop stale peers every 15s. Pure side-effect on the in-memory map
+    // — the IPC `lanCache:peers` already filters by lastSeen, but the
+    // sweep keeps the map from growing unbounded across a long session.
+    lanCacheState.peerSweepInterval = setInterval(() => {
+      const before = lanCacheState.peers.size;
+      const cutoff = Date.now() - 60_000;
+      for (const [key, peer] of lanCacheState.peers) {
+        if (peer.lastSeen < cutoff) lanCacheState.peers.delete(key);
+      }
+      if (lanCacheState.peers.size !== before) emitPeersUpdate();
+    }, 15_000);
+  }
+}
+
+function stopMdnsService() {
+  if (lanCacheState.peerSweepInterval) {
+    clearInterval(lanCacheState.peerSweepInterval);
+    lanCacheState.peerSweepInterval = null;
+  }
+  try {
+    if (lanCacheState.browser) lanCacheState.browser.stop();
+  } catch {
+    // ignore
+  }
+  try {
+    if (lanCacheState.service) lanCacheState.service.stop?.();
+  } catch {
+    // ignore
+  }
+  try {
+    if (lanCacheState.bonjour) lanCacheState.bonjour.destroy();
+  } catch {
+    // ignore
+  }
+  lanCacheState.bonjour = null;
+  lanCacheState.service = null;
+  lanCacheState.browser = null;
+  lanCacheState.peers.clear();
+  emitPeersUpdate();
+}
+
+ipcMain.handle("lanCache:peers", async () => listLanCachePeers());
+
+ipcMain.handle("lanCache:listFromPeer", async (_event, { clientId, dir }) => {
+  const peer = lanCacheState.peers.get(clientId);
+  if (!peer) throw new Error("Peer not found.");
+  const u = `http://${peer.host}:${peer.port}/list?dir=${encodeURIComponent(dir || "")}`;
+  const resp = await fetch(u);
+  if (!resp.ok) throw new Error(`Peer responded ${resp.status}`);
+  return resp.json();
+});
+
+ipcMain.handle("lanCache:pullFromPeer", async (_event, { clientId, remotePath }) => {
+  const peer = lanCacheState.peers.get(clientId);
+  if (!peer) throw new Error("Peer not found.");
+  const u = `http://${peer.host}:${peer.port}/file?path=${encodeURIComponent(remotePath)}`;
+  // Save into ~/Downloads so the user finds it predictably.
+  const dest = path.join(
+    app.getPath("downloads"),
+    `${path.basename(remotePath)}.from-${peer.name || "peer"}`,
+  );
+  const resp = await fetch(u);
+  if (!resp.ok) throw new Error(`Peer responded ${resp.status}`);
+  // Node's response body is a web stream; pipe it through a writable.
+  const writer = fssync.createWriteStream(dest);
+  const reader = resp.body.getReader();
+  let bytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.length;
+    if (!writer.write(value)) {
+      await new Promise((r) => writer.once("drain", r));
+    }
+  }
+  await new Promise((resolve, reject) => {
+    writer.end((err) => (err ? reject(err) : resolve()));
+  });
+  return { ok: true, path: dest, bytes };
+});
+
+// ---- Feature loop reconciler -------------------------------------------------
+//
+// Single entry-point that looks at the current settings.features map and
+// starts / stops each background loop accordingly. Called on app.whenReady
+// and after every settings:set so flipping a toggle is enough — no app
+// restart required.
+
+async function reconcileFeatures() {
+  const settings = await loadSettings();
+  const flags = settings.features || {};
+
+  if (flags.presence?.enabled) startPresenceLoop();
+  else stopPresenceLoop();
+
+  if (flags.prefetch?.enabled) startPrefetchWatcher();
+  else stopPrefetchWatcher();
+
+  if (flags.lanCache?.enabled) await startLanCacheServer();
+  else stopLanCacheServer();
+
+  // acls loop is data-layer-only and attaches in the next commit; the
+  // toggle gates the renderer ACLs panel rather than a background loop
+  // here.
+}
 
 ipcMain.handle("dialog:pick-folder", async () => {
   const result = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });
@@ -211,9 +941,23 @@ let mountState = {
 };
 let mountChild = null;
 
+// Track the last status we emitted so we only kick the feature
+// reconciler on actual transitions (mounted ↔ unmounted), not on every
+// log line that flows through emitMountStatus.
+let lastEmittedMountStatus = null;
+
 function emitMountStatus() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("mount:status", { ...mountState, log: mountState.log.slice(-30) });
+  }
+  if (mountState.status !== lastEmittedMountStatus) {
+    lastEmittedMountStatus = mountState.status;
+    // Mount transitions affect which feature loops can run (presence and
+    // prefetch both need a live mountPath). Reconcile here so flipping the
+    // mount on or off picks up the right loop state without a settings save.
+    void reconcileFeatures().catch((err) => {
+      console.error("reconcileFeatures failed after mount status change:", err);
+    });
   }
 }
 
@@ -639,8 +1383,6 @@ ipcMain.handle("resolve:set-active-project", async (_event, { projectId }) => {
 // to open. Writing a Premiere-valid .prproj from scratch is harder than
 // it looks; round-tripping the original blob is the safe play.
 
-const zlib = require("node:zlib");
-
 ipcMain.handle("dialog:pick-prproj", async () => {
   const result = await dialog.showOpenDialog({
     properties: ["openFile"],
@@ -1041,6 +1783,12 @@ async function tryAutoMount() {
 
 // Best-effort cleanup on quit so we don't leave a half-attached FUSE volume.
 app.on("before-quit", async (event) => {
+  // Stop feature loops first; presence's stopPresenceLoop also clears
+  // this client's lock row in Convex so the next "who's online" read
+  // doesn't show a stale phantom.
+  stopPresenceLoop();
+  stopPrefetchWatcher();
+  stopLanCacheServer();
   if (mountChild) {
     event.preventDefault();
     pushLog("App quit — unmounting first.");
@@ -1082,6 +1830,11 @@ function createWindow() {
 app.whenReady().then(() => {
   createWindow();
   void tryAutoMount();
+  // Kick off any feature loops the user has enabled. Errors get logged
+  // but don't block the window from opening.
+  void reconcileFeatures().catch((err) => {
+    console.error("reconcileFeatures failed on startup:", err);
+  });
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

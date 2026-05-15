@@ -78,6 +78,7 @@ export function App() {
               const saved = await api.settings.set(next);
               setSettings(saved);
             }}
+            client={client}
             firstRun
           />
         ) : tab === "settings" ? (
@@ -87,9 +88,10 @@ export function App() {
               const saved = await api.settings.set(next);
               setSettings(saved);
             }}
+            client={client}
           />
         ) : tab === "mount" ? (
-          <MountView settings={settings} />
+          <MountView settings={settings} client={client} />
         ) : selectedProjectId ? (
           <ProjectDetail
             client={client}

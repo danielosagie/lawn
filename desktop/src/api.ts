@@ -4,6 +4,23 @@
  * functions.
  */
 
+/**
+ * LucidLink-parity feature flags. Each one gates a background loop or
+ * surface in the main process — see electron-main.cjs DEFAULT_FEATURES
+ * for the canonical shape. Defaults are all `enabled: false` so the
+ * desktop app behaves the same as before until the user opts in.
+ */
+export interface DesktopFeatureFlags {
+  /** File-level presence + soft locks ("Alex has X open in Premiere"). */
+  presence: { enabled: boolean };
+  /** Predictive prefetch on `.prproj` open — warms rclone's VFS cache. */
+  prefetch: { enabled: boolean };
+  /** LAN-shared cache (mDNS-discovered peers serve cached files). */
+  lanCache: { enabled: boolean; port: number };
+  /** Filesystem-level ACLs / team folder permissions. */
+  acls: { enabled: boolean };
+}
+
 export interface DesktopSettings {
   convexUrl: string;
   convexAuthToken: string;
@@ -18,6 +35,7 @@ export interface DesktopSettings {
   rootDir: string;
   /** Which project the Resolve snapshot/restore actions push to / pull from. */
   activeProjectId?: string;
+  features: DesktopFeatureFlags;
 }
 
 export interface SyncProgress {
@@ -109,6 +127,27 @@ interface DesktopApi {
       suggestedName?: string;
     }) => Promise<{ ok: boolean; cancelled?: boolean; path?: string }>;
   };
+  lanCache: {
+    peers: () => Promise<LanCachePeer[]>;
+    listFromPeer: (args: {
+      clientId: string;
+      dir?: string;
+    }) => Promise<{ dir: string; entries: { name: string; isDirectory: boolean }[]; truncated: boolean }>;
+    pullFromPeer: (args: {
+      clientId: string;
+      remotePath: string;
+    }) => Promise<{ ok: boolean; path: string; bytes: number }>;
+    onPeers: (handler: (peers: LanCachePeer[]) => void) => () => void;
+  };
+}
+
+export interface LanCachePeer {
+  clientId: string;
+  name: string;
+  host: string;
+  port: number;
+  mountPath: string;
+  lastSeen: number;
 }
 
 declare global {

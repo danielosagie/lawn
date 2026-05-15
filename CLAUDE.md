@@ -63,8 +63,13 @@ whitespace do the heavy lifting.
 ## Branding notes
 
 - Wordmark is `snip` with the period in `#C2410C`: `snip<span class="text-[#C2410C]">.</span>`
-- Logo asset is `public/grass-logo.svg` (palm tree on a burnt-orange sand strip;
-  filename kept stable to avoid breaking the static path; replaceable in place)
+- Logo asset is `public/grass-logo.svg` — Lucide Film icon on the snip
+  orange, matching `public/favicon.svg`. Same mark renders as the
+  favicon, the macOS app icon (`desktop/resources/icon.icns` is
+  generated from this file by `desktop/scripts/generate-dmg-assets.sh`
+  at CI time), and any in-product logo surface. Filename is kept
+  stable to avoid breaking static references — replace the contents,
+  not the path.
 - Bulk rebrand happened via sed; a few historic identifiers stayed for safety:
   - `localStorage` keys (`lawn-theme`, `lawn:sidebar:collapsed`, `lawn.presence.client_id`)
   - The GitHub URL `github.com/pingdotgg/lawn`
