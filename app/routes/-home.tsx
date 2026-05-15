@@ -64,7 +64,7 @@ export default function Homepage() {
           <a href="#pricing" className="hover:underline underline-offset-4">Pricing</a>
           <Link to="/compare/frameio" className={`hover:underline underline-offset-4 hidden sm:block`}>Compare</Link>
           <a
-            href="https://github.com/danielosagie/lawn/releases/latest/download/snip-desktop.dmg"
+            href="/downloads/snip-desktop.dmg"
             className={`hidden sm:inline-flex items-center gap-1.5 hover:underline underline-offset-4`}
             title="Download snip Desktop for macOS"
           >

@@ -4,6 +4,20 @@
   "outputDirectory": "dist/client",
   "routes": [
     { "handle": "filesystem" },
+    {
+      "src": "/downloads/snip-desktop\\.dmg",
+      "status": 302,
+      "headers": {
+        "Location": "https://github.com/danielosagie/lawn/releases/latest/download/snip-desktop.dmg"
+      }
+    },
+    {
+      "src": "/downloads/snip-desktop-x64\\.dmg",
+      "status": 302,
+      "headers": {
+        "Location": "https://github.com/danielosagie/lawn/releases/latest/download/snip-desktop-x64.dmg"
+      }
+    },
     { "src": "/(.*)", "dest": "/_shell.html" }
   ]
 }
