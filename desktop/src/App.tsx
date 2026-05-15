@@ -89,7 +89,7 @@ export function App() {
             }}
           />
         ) : tab === "mount" ? (
-          <MountView settings={settings} />
+          <MountView settings={settings} client={client} />
         ) : selectedProjectId ? (
           <ProjectDetail
             client={client}

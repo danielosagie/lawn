@@ -1,8 +1,20 @@
 import { useEffect, useRef, useState } from "react";
+import type { ConvexClient } from "convex/browser";
 import { api, DesktopSettings, MountPrereqs, MountState } from "./api";
+import { useConvexQuery } from "./useConvex";
+
+interface PresenceLock {
+  _id: string;
+  clientId: string;
+  userName?: string;
+  mountPath: string;
+  files: { path: string; process?: string; pid?: number }[];
+  lastSeen: number;
+}
 
 interface Props {
   settings: DesktopSettings;
+  client: ConvexClient | null;
 }
 
 /**
@@ -11,7 +23,7 @@ interface Props {
  * log tail. The same drive layout you'd get from the manual rclone
  * recipe in docs/MOUNTING.md — minus the Terminal commands.
  */
-export function MountView({ settings }: Props) {
+export function MountView({ settings, client }: Props) {
   const [state, setState] = useState<MountState | null>(null);
   const [prereqs, setPrereqs] = useState<MountPrereqs | null>(null);
   const [busy, setBusy] = useState(false);
@@ -211,6 +223,13 @@ export function MountView({ settings }: Props) {
         </pre>
       </section>
 
+      {settings.features.presence.enabled ? (
+        <LivePresencePanel
+          client={client}
+          activeProjectId={settings.activeProjectId}
+        />
+      ) : null}
+
       <p style={{ fontSize: 11, color: "#888", marginTop: 14 }}>
         See <code>docs/MOUNTING.md</code> for performance tuning + alternatives
         (Mountpoint for S3, LucidLink). Mounts use FUSE under the hood — same
@@ -317,6 +336,104 @@ function PrereqPanel({ prereqs }: { prereqs: MountPrereqs | null }) {
       >
         {prereqs.installHint}
       </pre>
+    </section>
+  );
+}
+
+
+function LivePresencePanel({
+  client,
+  activeProjectId,
+}: {
+  client: ConvexClient | null;
+  activeProjectId?: string;
+}) {
+  // No project selected → don't render. The desktop runs the presence
+  // poll regardless (so other team members in the same project can see
+  // YOU), but rendering the panel without a project would give us
+  // nothing useful to list.
+  const locks =
+    useConvexQuery<PresenceLock[]>(
+      client,
+      "desktopPresence:listForProject",
+      activeProjectId ? { projectId: activeProjectId } : "skip",
+    ) ?? [];
+
+  return (
+    <section style={{ border: "2px solid #1a1a1a", marginTop: 14, padding: 14 }}>
+      <header
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "baseline",
+          marginBottom: 10,
+        }}
+      >
+        <strong style={{ fontSize: 13 }}>LIVE PRESENCE</strong>
+        <span style={{ fontSize: 11, color: "#888", fontFamily: "monospace" }}>
+          {activeProjectId ? `${locks.length} active` : "no project selected"}
+        </span>
+      </header>
+      {!activeProjectId ? (
+        <p style={{ fontSize: 11, color: "#888", margin: 0 }}>
+          Pick an active project in the Projects tab to see who has which
+          files open across the team.
+        </p>
+      ) : locks.length === 0 ? (
+        <p style={{ fontSize: 11, color: "#888", margin: 0 }}>
+          No teammates currently have files open under this mount.
+        </p>
+      ) : (
+        <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+          {locks.map((row) => (
+            <li
+              key={row._id}
+              style={{
+                borderTop: "1px solid #ccc",
+                padding: "8px 0",
+                fontSize: 12,
+              }}
+            >
+              <div style={{ fontWeight: 700 }}>
+                {row.userName || row.clientId.slice(0, 8)}
+                <span
+                  style={{
+                    color: "#888",
+                    fontWeight: 400,
+                    fontSize: 10,
+                    marginLeft: 8,
+                  }}
+                >
+                  {row.files.length} file{row.files.length === 1 ? "" : "s"} open
+                </span>
+              </div>
+              <ul
+                style={{
+                  margin: "4px 0 0",
+                  paddingLeft: 16,
+                  fontFamily: "monospace",
+                  fontSize: 11,
+                  color: "#555",
+                }}
+              >
+                {row.files.slice(0, 6).map((f, i) => (
+                  <li key={i}>
+                    {f.path}
+                    {f.process ? (
+                      <span style={{ color: "#888" }}> — {f.process}</span>
+                    ) : null}
+                  </li>
+                ))}
+                {row.files.length > 6 ? (
+                  <li style={{ color: "#888" }}>
+                    + {row.files.length - 6} more…
+                  </li>
+                ) : null}
+              </ul>
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }

@@ -5,7 +5,8 @@ const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs/promises");
 const fssync = require("node:fs");
-const { spawn, execSync } = require("node:child_process");
+const { spawn, execSync, execFile } = require("node:child_process");
+const crypto = require("node:crypto");
 
 const DEV_URL = "http://localhost:5300";
 const PROD_INDEX = path.join(__dirname, "dist/index.html");
@@ -162,8 +163,198 @@ function reportProgress(payload) {
 ipcMain.handle("settings:get", async () => loadSettings());
 ipcMain.handle("settings:set", async (_event, next) => {
   await saveSettings(next);
+  // Re-evaluate background loops against the new flags.
+  await reconcileFeatures().catch((err) => {
+    console.error("reconcileFeatures failed after settings:set:", err);
+  });
   return next;
 });
+
+// ---- Convex HTTP helper (for background loops in this file) ------------------
+//
+// The existing call-sites in this file inline the fetch + bearer-token dance;
+// pulling it out so the presence + prefetch loops can hit Convex with one
+// line. Errors are logged but don't throw — these loops are best-effort and
+// must never crash the app on transient Convex outages.
+
+async function convexCall(kind, fnPath, args) {
+  const settings = await loadSettings();
+  if (!settings.convexUrl || !settings.convexAuthToken) {
+    throw new Error("Convex URL + auth token not configured.");
+  }
+  const url = `${settings.convexUrl.replace(/\/$/, "")}/api/${kind}`;
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${settings.convexAuthToken}`,
+    },
+    body: JSON.stringify({ path: fnPath, args, format: "json" }),
+  });
+  if (!resp.ok) {
+    throw new Error(`Convex ${kind} ${fnPath} → HTTP ${resp.status}: ${await resp.text()}`);
+  }
+  const body = await resp.json();
+  if (body.status === "error") {
+    throw new Error(`Convex ${fnPath}: ${body.errorMessage || "unknown error"}`);
+  }
+  return body.value;
+}
+
+// ---- Feature loop: file presence + soft locks --------------------------------
+//
+// Polls `lsof` against the active mount path every 5s, posts the list of
+// open files + the process that has them to Convex via
+// `desktopPresence:upsertLocks`. Other team members read those rows via
+// `desktopPresence:listForProject` to render "Alex has X open" badges.
+//
+// The lsof invocation:
+//   lsof -Fpcn +D <mountPath>
+// emits one stanza per open fd:
+//   p<pid>
+//   c<command>
+//   n<path>
+// We filter to files under the mount and dedupe by (pid, path) — most
+// editors hold the same file open from many fds.
+
+const CLIENT_ID_FILE = path.join(SETTINGS_DIR, "client-id");
+
+function getClientId() {
+  try {
+    return fssync.readFileSync(CLIENT_ID_FILE, "utf8").trim();
+  } catch {
+    const id = crypto.randomBytes(8).toString("hex");
+    try {
+      fssync.mkdirSync(SETTINGS_DIR, { recursive: true });
+      fssync.writeFileSync(CLIENT_ID_FILE, id);
+    } catch {
+      // Non-fatal: presence will use an ephemeral ID for this session.
+    }
+    return id;
+  }
+}
+
+const presenceState = {
+  intervalId: null,
+  inFlight: false,
+};
+
+function parseLsof(stdout, mountPath) {
+  // Editors open the same file on many fds; the (pid, path) dedupe keeps
+  // the payload small and predictable for the Convex row size limit.
+  const seen = new Set();
+  const out = [];
+  let cur = {};
+  const flush = () => {
+    if (cur.path && cur.path.startsWith(mountPath)) {
+      const key = `${cur.pid}::${cur.path}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push({
+          path: cur.path.slice(mountPath.length).replace(/^\//, ""),
+          process: cur.process,
+          pid: cur.pid,
+        });
+      }
+    }
+    cur = {};
+  };
+  for (const line of stdout.split("\n")) {
+    if (!line) continue;
+    const type = line[0];
+    const value = line.slice(1);
+    if (type === "p") {
+      flush();
+      cur.pid = Number(value) || undefined;
+    } else if (type === "c") {
+      cur.process = value;
+    } else if (type === "n") {
+      cur.path = value;
+    }
+  }
+  flush();
+  return out;
+}
+
+function listOpenFilesUnderMount(mountPath) {
+  return new Promise((resolve) => {
+    if (!mountPath) return resolve([]);
+    // -F p,c,n: machine-readable fields. +D recurses into the directory.
+    // Timeout 4s so a stuck lsof can't pin the loop forever.
+    execFile(
+      "lsof",
+      ["-Fpcn", "+D", mountPath],
+      { timeout: 4000, maxBuffer: 4 * 1024 * 1024 },
+      (err, stdout) => {
+        // lsof exits 1 when nothing is open under the path; treat as success.
+        if (err && err.code !== 1) return resolve([]);
+        resolve(parseLsof(stdout || "", mountPath));
+      },
+    );
+  });
+}
+
+async function pushPresenceOnce() {
+  if (presenceState.inFlight) return;
+  presenceState.inFlight = true;
+  try {
+    const settings = await loadSettings();
+    if (!settings.features?.presence?.enabled) return;
+    if (!settings.convexUrl || !settings.convexAuthToken) return;
+    if (mountState.status !== "mounted" || !mountState.mountPath) return;
+
+    const files = await listOpenFilesUnderMount(mountState.mountPath);
+    await convexCall("mutation", "desktopPresence:upsertLocks", {
+      clientId: getClientId(),
+      projectId: settings.activeProjectId || undefined,
+      mountPath: mountState.mountPath,
+      files,
+    });
+  } catch (err) {
+    // Best-effort; surface to the mount log so users can debug if a
+    // misconfigured Convex token or expired session causes silence.
+    pushLog?.(`presence: ${err.message}`);
+  } finally {
+    presenceState.inFlight = false;
+  }
+}
+
+function startPresenceLoop() {
+  if (presenceState.intervalId) return;
+  // Immediate first push so a freshly-opened editor shows up without a
+  // 5s wait, then steady-state cadence.
+  void pushPresenceOnce();
+  presenceState.intervalId = setInterval(pushPresenceOnce, 5000);
+}
+
+function stopPresenceLoop() {
+  if (!presenceState.intervalId) return;
+  clearInterval(presenceState.intervalId);
+  presenceState.intervalId = null;
+  // Clear our row on stop so other users don't keep seeing a stale
+  // "open files" set for the next ~30s.
+  void convexCall("mutation", "desktopPresence:clearLocks", {
+    clientId: getClientId(),
+  }).catch(() => {});
+}
+
+// ---- Feature loop reconciler -------------------------------------------------
+//
+// Single entry-point that looks at the current settings.features map and
+// starts / stops each background loop accordingly. Called on app.whenReady
+// and after every settings:set so flipping a toggle is enough — no app
+// restart required.
+
+async function reconcileFeatures() {
+  const settings = await loadSettings();
+  const flags = settings.features || {};
+
+  if (flags.presence?.enabled) startPresenceLoop();
+  else stopPresenceLoop();
+
+  // prefetch + lanCache + acls loops attach in follow-up commits. Their
+  // toggles persist now so the UI is wired before the implementations.
+}
 
 ipcMain.handle("dialog:pick-folder", async () => {
   const result = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });
@@ -1061,6 +1252,10 @@ async function tryAutoMount() {
 
 // Best-effort cleanup on quit so we don't leave a half-attached FUSE volume.
 app.on("before-quit", async (event) => {
+  // Stop feature loops first; presence's stopPresenceLoop also clears
+  // this client's lock row in Convex so the next "who's online" read
+  // doesn't show a stale phantom.
+  stopPresenceLoop();
   if (mountChild) {
     event.preventDefault();
     pushLog("App quit — unmounting first.");
@@ -1102,6 +1297,11 @@ function createWindow() {
 app.whenReady().then(() => {
   createWindow();
   void tryAutoMount();
+  // Kick off any feature loops the user has enabled. Errors get logged
+  // but don't block the window from opening.
+  void reconcileFeatures().catch((err) => {
+    console.error("reconcileFeatures failed on startup:", err);
+  });
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

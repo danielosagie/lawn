@@ -603,6 +603,39 @@ export default defineSchema({
     .index("by_team", ["teamId"])
     .index("by_team_and_deleted_at", ["teamId", "deletedAt"]),
 
+  /**
+   * Live "who has what file open" state from the snip Desktop app.
+   * The desktop main process polls `lsof` against the mount path every
+   * few seconds and upserts the row for its `clientId` (a stable
+   * per-install ID). Rows older than ~30s are stale and the read query
+   * filters them out; we don't TTL because Convex doesn't have native
+   * TTL — stale rows are overwritten on the next push, or cleared on
+   * graceful shutdown via `desktopPresence:clearLocks`.
+   */
+  desktopFileLocks: defineTable({
+    clientId: v.string(),
+    userClerkId: v.string(),
+    userName: v.optional(v.string()),
+    // Project the mount is rooted under. Optional because the desktop
+    // app can run before the user picks an active project.
+    projectId: v.optional(v.id("projects")),
+    teamId: v.optional(v.id("teams")),
+    mountPath: v.string(),
+    files: v.array(
+      v.object({
+        // Path relative to mountPath.
+        path: v.string(),
+        // The process that has the file open, e.g. "Adobe Premiere Pro 2024".
+        process: v.optional(v.string()),
+        pid: v.optional(v.number()),
+      }),
+    ),
+    lastSeen: v.number(),
+  })
+    .index("by_client", ["clientId"])
+    .index("by_project", ["projectId"])
+    .index("by_team", ["teamId"]),
+
   projectVersions: defineTable({
     projectId: v.id("projects"),
     teamId: v.id("teams"),
