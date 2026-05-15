@@ -217,8 +217,9 @@ export function DashboardSidebar() {
         {/* Desktop app download — separated section above the New project
             button. Sits in its own div so it reads as "tooling you can
             install" rather than another nav item or a peer of project
-            creation. The link is a placeholder until the GitHub Action
-            uploads a real DMG to /downloads/. */}
+            creation. `/downloads/snip-desktop.dmg` 302-redirects (via
+            vercel.json) to the rolling `desktop-latest` GitHub Release
+            asset — the DMG itself is too large to commit into the repo. */}
         <div className="px-3 pt-3 pb-1 border-t-2 border-[#1a1a1a]">
           <a
             href="/downloads/snip-desktop.dmg"

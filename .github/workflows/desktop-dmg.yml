@@ -116,49 +116,54 @@ jobs:
             desktop/release/*.dmg
             desktop/release/*.dmg.blockmap
 
-  # Republish the latest main-branch DMG to the web app's /public/downloads
-  # tree so the in-app "Download" buttons resolve to a real file. Only
-  # runs on push-to-main and pulls the just-built arm64 artifact (universal
-  # would be nicer but doubles build time; arm64 covers Apple Silicon, which
-  # is most snip users).
-  publish-web:
-    name: Publish to web /downloads
+  # Publish the latest main-branch DMGs as a rolling GitHub Release so the
+  # web app's "Download" buttons resolve to a real file. Avoids committing
+  # 100+ MB binaries into the repo (which hits GitHub's hard push limit).
+  # Runs only on push-to-main and overwrites the `desktop-latest` release's
+  # assets each time.
+  publish-release:
+    name: Publish to desktop-latest release
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Download arm64 DMG
         uses: actions/download-artifact@v4
         with:
           name: snip-desktop-arm64
-          path: desktop-dmg
+          path: artifacts/arm64
 
-      - name: Copy DMG into public/downloads
-        run: |
-          mkdir -p public/downloads
-          dmg="$(ls desktop-dmg/*.dmg | head -n1)"
-          if [[ -z "$dmg" ]]; then
-            echo "No DMG produced — skipping publish."
-            exit 0
-          fi
-          cp "$dmg" public/downloads/snip-desktop.dmg
-          # Keep a versioned filename next to the canonical "latest" one
-          # so historical downloads are still reachable via git history.
-          cp "$dmg" "public/downloads/$(basename "$dmg")"
+      - name: Download x64 DMG
+        uses: actions/download-artifact@v4
+        with:
+          name: snip-desktop-x64
+          path: artifacts/x64
 
-      - name: Commit + push if changed
+      - name: Rename DMGs to stable asset names
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add public/downloads
-          if git diff --cached --quiet; then
-            echo "No DMG changes — nothing to commit."
-            exit 0
+          mkdir -p release-assets
+          arm_src="$(ls artifacts/arm64/*.dmg | head -n1)"
+          x64_src="$(ls artifacts/x64/*.dmg | head -n1)"
+          if [[ -z "$arm_src" || -z "$x64_src" ]]; then
+            echo "Missing DMG artifact — arm64='$arm_src' x64='$x64_src'" >&2
+            exit 1
           fi
-          git commit -m "ci: publish snip Desktop DMG ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
-          git push
+          cp "$arm_src" release-assets/snip-desktop.dmg
+          cp "$x64_src" release-assets/snip-desktop-x64.dmg
+          ls -la release-assets/
+
+      - name: Upload to desktop-latest release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: desktop-latest
+          name: snip Desktop (latest)
+          body: |
+            Rolling latest build of snip Desktop from the `main` branch
+            (commit ${{ github.sha }}).
+
+            - `snip-desktop.dmg` — Apple Silicon (arm64)
+            - `snip-desktop-x64.dmg` — Intel (x64)
+          files: release-assets/*.dmg
+          make_latest: "true"
