@@ -246,13 +246,19 @@ function parseLsof(stdout, mountPath) {
   const seen = new Set();
   const out = [];
   let cur = {};
+  // Path boundary: a sibling mount at `/mnt/proj2` must NOT match a
+  // mountPath of `/mnt/proj`, even though `startsWith` says yes. Append
+  // the platform separator so the prefix is forced to be at a path
+  // boundary. Match on the bare mountPath too (lsof can report the mount
+  // root itself when an app has a handle on the directory).
+  const mountRootWithSep = mountPath.endsWith(path.sep) ? mountPath : `${mountPath}${path.sep}`;
   const flush = () => {
-    if (cur.path && cur.path.startsWith(mountPath)) {
+    if (cur.path && (cur.path === mountPath || cur.path.startsWith(mountRootWithSep))) {
       const key = `${cur.pid}::${cur.path}`;
       if (!seen.has(key)) {
         seen.add(key);
         out.push({
-          path: cur.path.slice(mountPath.length).replace(/^\//, ""),
+          path: cur.path.slice(mountPath.length).replace(/^[/\\]/, ""),
           process: cur.process,
           pid: cur.pid,
         });
@@ -394,9 +400,14 @@ function decompressIfGzip(buf) {
 function extractMountPathsFromProject(text, mountPath) {
   // Scan for substrings that start with the mount root and look like
   // file paths. The regex bound is `[^<>"'\s]+` which covers paths
-  // embedded in XML attributes ("path=...") and CDATA blocks.
+  // embedded in XML attributes ("path=...") and CDATA blocks. We accept
+  // either '/' or '\\' as the separator after the mount root so a
+  // .prproj that was authored on Windows and synced to a Mac mount via
+  // cloud-side rclone-style sharing still matches; downstream warming
+  // normalizes by passing the path straight to createReadStream which
+  // accepts both separators on POSIX hosts too.
   const escaped = mountPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(`${escaped}/[^<>"'\\s]+`, "g");
+  const re = new RegExp(`${escaped}[\\\\/][^<>"'\\s]+`, "g");
   const out = new Set();
   let match;
   let count = 0;
@@ -483,7 +494,11 @@ function startPrefetchWatcher() {
       mountPath,
       { recursive: true, persistent: false },
       (eventType, filename) => {
-        if (eventType !== "change" || !filename) return;
+        // Premiere autosaves often land as a temp-file → rename swap so
+        // the editor never sees a half-written project. fs.watch emits
+        // those as "rename" events on the final name, not "change".
+        // Accept both so we don't miss real saves.
+        if ((eventType !== "change" && eventType !== "rename") || !filename) return;
         if (!filename.endsWith(".prproj")) return;
         const abs = path.join(mountPath, filename);
         void handlePrprojWrite(abs, mountPath);

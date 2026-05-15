@@ -1,11 +1,22 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { requireProjectAccess } from "./auth";
 
 /**
  * The desktop app polls `lsof` against its mount path and upserts the
  * current set of open files for its `clientId`. We key by clientId
  * (not userClerkId) so the same user running snip Desktop on a laptop
  * + a workstation shows up as two presences, not one merged row.
+ *
+ * Authorization:
+ * - Caller must be authenticated.
+ * - If a projectId is supplied, the caller must have access to that
+ *   project — otherwise a user could pollute a stranger's project
+ *   presence by guessing its ID.
+ * - Patching an existing row requires the caller to own it (matches
+ *   on userClerkId). Defensive — clientId is 8 random bytes so
+ *   collision is extremely unlikely, but stops one client from
+ *   overwriting another's presence by reusing its clientId.
  */
 export const upsertLocks = mutation({
   args: {
@@ -25,6 +36,10 @@ export const upsertLocks = mutation({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated.");
+    if (args.projectId) {
+      // Throws if the caller isn't a member of the project's team.
+      await requireProjectAccess(ctx, args.projectId);
+    }
 
     const existing = await ctx.db
       .query("desktopFileLocks")
@@ -43,6 +58,9 @@ export const upsertLocks = mutation({
     };
 
     if (existing) {
+      if (existing.userClerkId !== identity.subject) {
+        throw new Error("Forbidden: clientId belongs to a different user.");
+      }
       await ctx.db.patch(existing._id, payload);
       return existing._id;
     }
@@ -51,15 +69,19 @@ export const upsertLocks = mutation({
 });
 
 /**
- * Anyone authenticated to the project's team can read presence for it.
- * The 30s freshness cutoff matches the desktop's 5s push cadence with
- * generous slack for laptop sleep / transient network blips.
+ * Presence is sensitive (it leaks which files a teammate has open,
+ * incl. unreleased contract drafts). Restrict reads to members of the
+ * project's team — same gate as projects:get and friends.
  */
 export const listForProject = query({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return [];
+    try {
+      // Throws "Project not found" or a 403-equivalent on miss.
+      await requireProjectAccess(ctx, args.projectId);
+    } catch {
+      return [];
+    }
     const cutoff = Date.now() - 30_000;
     const rows = await ctx.db
       .query("desktopFileLocks")

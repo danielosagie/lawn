@@ -14,7 +14,21 @@ export function SettingsView({ settings, onChange, firstRun }: Props) {
   const save = async () => {
     setSaving(true);
     try {
-      await onChange(draft);
+      // Final sanitization pass before persistence — catches any
+      // out-of-range or non-integer value that slipped past the onChange
+      // handler (paste, devtools edit, programmatic setDraft).
+      const port = draft.features.lanCache.port;
+      const safePort = Number.isInteger(port)
+        ? Math.min(65535, Math.max(1024, port))
+        : 17900;
+      const sanitized: DesktopSettings = {
+        ...draft,
+        features: {
+          ...draft.features,
+          lanCache: { ...draft.features.lanCache, port: safePort },
+        },
+      };
+      await onChange(sanitized);
     } finally {
       setSaving(false);
     }
@@ -187,7 +201,18 @@ export function SettingsView({ settings, onChange, firstRun }: Props) {
               min={1024}
               max={65535}
               value={draft.features.lanCache.port}
-              onChange={(e) => setFeature("lanCache", { port: Number(e.target.value) || 17900 })}
+              onChange={(e) => {
+                // Sanitize: must be an integer in [1024, 65535]; fall
+                // back to the default for blanks / NaN / out-of-range.
+                // The HTML `min`/`max` attributes are advisory only,
+                // they don't prevent programmatic or paste-driven
+                // bad values from reaching us.
+                const raw = Number(e.target.value);
+                const safe = Number.isInteger(raw)
+                  ? Math.min(65535, Math.max(1024, raw))
+                  : 17900;
+                setFeature("lanCache", { port: safe });
+              }}
               disabled={!draft.features.lanCache.enabled}
               style={{ width: 80, fontFamily: "monospace", fontSize: 11 }}
               title="Local HTTP cache server port"
